@@ -47,7 +47,7 @@ cd ./examples/llama
 bash ./setup/setup.sh
 # Run the model
 cargo run --release --features metal    # MacOS (Recommended)
-cargo run --release --features cuda     # Nvidia
+cargo run --release --features cuda     # Nvidia (Optional ENV: CUDA_GPU_ARCH, CUDA_INCLUDE_PATHS)
 cargo run --release                     # CPU
 ```
 

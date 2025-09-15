@@ -113,12 +113,18 @@ pub fn compile_kernels(
             writeln!(log_file, "Compiling kernel:\n{}\n", kernel.code)
                 .expect("Failed to write to kernel log file");
 
+            // Allow overriding the GPU architecture via environment variable
+            let gpu_arch =
+                std::env::var("CUDA_GPU_ARCH").unwrap_or_else(|_| "compute_75".to_string());
+            // Allow overriding the include paths via environment variable
+            let include_paths =
+                std::env::var("CUDA_INCLUDE_PATHS").unwrap_or_else(|_| "/usr/include".to_string());
             let ptx = cudarc::nvrtc::compile_ptx_with_opts(
                 &kernel.code,
                 CompileOptions {
-                    include_paths: vec!["/usr/include".into()],
+                    include_paths: vec![include_paths.into()],
                     options: vec![
-                        "--gpu-architecture=compute_75".into(),
+                        format!("--gpu-architecture={}", gpu_arch).into(),
                         "--relocatable-device-code=false".into(),
                         "--std=c++14".into(),
                     ],
