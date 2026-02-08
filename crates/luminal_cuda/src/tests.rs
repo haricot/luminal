@@ -640,3 +640,114 @@ fn fuzz_test_cuda_genomes() {
     );
     assert!(tested > 0, "No genomes were tested");
 }
+
+/// Test embedding lookup using the standard transformer embedding pattern:
+/// embed_table.gather((token_ids * embed_dim).expand_dim(1, embed_dim) + arange(embed_dim).expand_dim(0, seq_len))
+#[test]
+pub fn test_embed() {
+    // Skip if CUDA is not available (catches both Err and panic from missing library)
+    let Some(stream) = std::panic::catch_unwind(|| get_cuda_stream())
+        .ok()
+        .flatten()
+    else {
+        return;
+    };
+
+    let vocab_size = 100;
+    let embed_dim = 64;
+    let seq_len = 10;
+
+    let mut cx = Graph::default();
+    let token_ids = cx.tensor(seq_len).as_dtype(DType::Int);
+    let embed_table = cx.tensor((vocab_size, embed_dim));
+    let output = embed_table
+        .gather(
+            (token_ids * embed_dim).expand_dim(1, embed_dim)
+                + cx.arange(embed_dim).expand_dim(0, seq_len),
+        )
+        .output();
+
+    cx.build_search_space::<CudaRuntime>();
+    let mut rt = CudaRuntime::initialize(stream);
+
+    // Generate token IDs (valid indices into vocab)
+    let token_data: Vec<i32> = (0..seq_len)
+        .map(|i| (i * 7 + 3) as i32 % vocab_size as i32)
+        .collect();
+    let embed_data: Vec<f32> = random_vec(vocab_size * embed_dim);
+
+    rt.set_data(token_ids, token_data.clone());
+    rt.set_data(embed_table, embed_data.clone());
+    rt = cx.search(rt, 5);
+    rt.execute(&cx.dyn_map);
+
+    let result = rt.get_f32(output);
+
+    // CPU reference: for each token, look up the corresponding row in the embedding table
+    let mut expected = vec![0.0f32; seq_len * embed_dim];
+    for i in 0..seq_len {
+        let tid = token_data[i] as usize;
+        for j in 0..embed_dim {
+            expected[i * embed_dim + j] = embed_data[tid * embed_dim + j];
+        }
+    }
+
+    assert_close(&result, &expected);
+}
+
+fn test_embed_inner(vocab_size: usize, embed_dim: usize, seq_len: usize) {
+    let Some(stream) = std::panic::catch_unwind(|| get_cuda_stream())
+        .ok()
+        .flatten()
+    else {
+        return;
+    };
+
+    let mut cx = Graph::default();
+    let token_ids = cx.tensor(seq_len).as_dtype(DType::Int);
+    let embed_table = cx.tensor((vocab_size, embed_dim));
+    let output = embed_table
+        .gather(
+            (token_ids * embed_dim).expand_dim(1, embed_dim)
+                + cx.arange(embed_dim).expand_dim(0, seq_len),
+        )
+        .output();
+
+    cx.build_search_space::<CudaRuntime>();
+    let mut rt = CudaRuntime::initialize(stream);
+
+    let token_data: Vec<i32> = (0..seq_len)
+        .map(|i| (i * 7 + 3) as i32 % vocab_size as i32)
+        .collect();
+    let embed_data: Vec<f32> = random_vec(vocab_size * embed_dim);
+
+    rt.set_data(token_ids, token_data.clone());
+    rt.set_data(embed_table, embed_data.clone());
+    rt = cx.search(rt, 5);
+    rt.execute(&cx.dyn_map);
+
+    let result = rt.get_f32(output);
+
+    let mut expected = vec![0.0f32; seq_len * embed_dim];
+    for i in 0..seq_len {
+        let tid = token_data[i] as usize;
+        for j in 0..embed_dim {
+            expected[i * embed_dim + j] = embed_data[tid * embed_dim + j];
+        }
+    }
+
+    assert_close(&result, &expected);
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(5))]
+
+    #[test]
+    fn test_embed_proptest(
+        vocab_size in 10usize..200,
+        embed_dim in 8usize..128,
+        seq_len in 1usize..32,
+    ) {
+        test_embed_inner(vocab_size, embed_dim, seq_len);
+    }
+}
