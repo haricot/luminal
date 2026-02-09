@@ -562,7 +562,7 @@ impl Expression {
         let lhs_expr = self.to_egglog();
         let rhs_expr = rhs.into().to_egglog();
         let mut program = String::new();
-        program.push_str(egglog_utils::BASE);
+        program.push_str(&egglog_utils::base_egglog());
         program.push('\n');
         program.push_str(egglog_utils::BASE_CLEANUP);
         program.push('\n');
@@ -1002,7 +1002,7 @@ fn egglog_simplify(e: Expression) -> Expression {
     }
     let expr = e.to_egglog();
     let mut program = String::new();
-    program.push_str(egglog_utils::BASE);
+    program.push_str(&egglog_utils::base_egglog());
     program.push('\n');
     program.push_str(egglog_utils::BASE_CLEANUP);
     program.push('\n');

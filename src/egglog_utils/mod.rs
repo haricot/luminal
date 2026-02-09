@@ -9,7 +9,10 @@ use std::hash::{Hash, Hasher};
 use std::{str, sync::Arc};
 use tracing::trace;
 
-pub const BASE: &str = include_str!("base.egg");
+pub mod api;
+mod base;
+pub use base::base_egglog;
+
 pub const BASE_CLEANUP: &str = include_str!("base_cleanup.egg");
 pub const RUN_SCHEDULE: &str = include_str!("run_schedule.egg");
 
@@ -71,7 +74,7 @@ pub fn early_egglog(
     cleanup: bool,
 ) -> String {
     [
-        BASE.to_string(),
+        base::base_egglog(),
         op_defs_string(ops),
         ops.iter().flat_map(|o| o.early_rewrites()).join("\n"),
         if cleanup {
@@ -95,7 +98,7 @@ pub fn early_egglog(
 
 pub fn full_egglog(program: &str, ops: &[Arc<Box<dyn EgglogOp>>], cleanup: bool) -> String {
     [
-        BASE.to_string(),
+        base::base_egglog(),
         op_defs_string(ops),
         ops.iter().flat_map(|o| o.rewrites()).join("\n"),
         if cleanup {
