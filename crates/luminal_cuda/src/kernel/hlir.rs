@@ -7,8 +7,11 @@ use cudarc::{
 };
 use itertools::Itertools;
 use luminal::{
-    egglog_utils::{extract_dtype, extract_expr, extract_expr_list},
-    op::OpParam::*,
+    egglog_utils::{
+        api::{SortDef, sort},
+        base::op_sorts,
+        extract_dtype, extract_expr, extract_expr_list,
+    },
     op::*,
     prelude::*,
 };
@@ -42,10 +45,20 @@ pub struct KernelMaxReduce {
     dtype: DType,
 }
 impl EgglogOp for KernelMaxReduce {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "KernelMax".to_string(),
-            vec![EList, Expr, Input, EList, Expr, EList, Dty],
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(
+            &s.ir,
+            "KernelMax",
+            &[
+                ("shape", &s.elist),
+                ("iters", &s.expr),
+                ("inp", &s.ir),
+                ("strides", &s.elist),
+                ("iter_stride", &s.expr),
+                ("out_strides", &s.elist),
+                ("dtype", &s.dtype),
+            ],
         )
     }
 
@@ -234,10 +247,20 @@ pub struct KernelSumReduce {
     dtype: DType,
 }
 impl EgglogOp for KernelSumReduce {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "KernelSum".to_string(),
-            vec![EList, Expr, Input, EList, Expr, EList, Dty],
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(
+            &s.ir,
+            "KernelSum",
+            &[
+                ("shape", &s.elist),
+                ("iters", &s.expr),
+                ("inp", &s.ir),
+                ("strides", &s.elist),
+                ("iter_stride", &s.expr),
+                ("out_strides", &s.elist),
+                ("dtype", &s.dtype),
+            ],
         )
     }
 
@@ -395,10 +418,21 @@ pub struct KernelAdd {
 }
 
 impl EgglogOp for KernelAdd {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "KernelAdd".to_string(),
-            vec![EList, Input, EList, Input, EList, EList, Dty, Dty],
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(
+            &s.ir,
+            "KernelAdd",
+            &[
+                ("shape", &s.elist),
+                ("inp_a", &s.ir),
+                ("a_strides", &s.elist),
+                ("inp_b", &s.ir),
+                ("b_strides", &s.elist),
+                ("out_strides", &s.elist),
+                ("dtype", &s.dtype),
+                ("b_dtype", &s.dtype),
+            ],
         )
     }
 
@@ -541,10 +575,21 @@ pub struct KernelMul {
 }
 
 impl EgglogOp for KernelMul {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "KernelMul".to_string(),
-            vec![EList, Input, EList, Input, EList, EList, Dty, Dty],
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(
+            &s.ir,
+            "KernelMul",
+            &[
+                ("shape", &s.elist),
+                ("inp_a", &s.ir),
+                ("a_strides", &s.elist),
+                ("inp_b", &s.ir),
+                ("b_strides", &s.elist),
+                ("out_strides", &s.elist),
+                ("dtype", &s.dtype),
+                ("b_dtype", &s.dtype),
+            ],
         )
     }
 
@@ -685,10 +730,21 @@ pub struct KernelGather {
 }
 
 impl EgglogOp for KernelGather {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "KernelGather".to_string(),
-            vec![EList, Input, EList, Input, EList, EList, EList, Dty],
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(
+            &s.ir,
+            "KernelGather",
+            &[
+                ("out_shape", &s.elist),
+                ("indexes", &s.ir),
+                ("index_strides", &s.elist),
+                ("data", &s.ir),
+                ("data_shape", &s.elist),
+                ("data_strides", &s.elist),
+                ("out_strides", &s.elist),
+                ("dtype", &s.dtype),
+            ],
         )
     }
 
@@ -828,8 +884,13 @@ pub struct KernelIota {
 }
 
 impl EgglogOp for KernelIota {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        ("KernelIota".to_string(), vec![Expr, Expr])
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(
+            &s.ir,
+            "KernelIota",
+            &[("expr", &s.expr), ("range", &s.expr)],
+        )
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -957,10 +1018,18 @@ pub struct KernelExp2 {
 }
 
 impl EgglogOp for KernelExp2 {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "KernelExp2".to_string(),
-            vec![EList, Input, EList, EList, Dty],
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(
+            &s.ir,
+            "KernelExp2",
+            &[
+                ("shape", &s.elist),
+                ("inp", &s.ir),
+                ("strides", &s.elist),
+                ("out_strides", &s.elist),
+                ("dtype", &s.dtype),
+            ],
         )
     }
 
@@ -1096,10 +1165,18 @@ pub struct KernelLog2 {
 }
 
 impl EgglogOp for KernelLog2 {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "KernelLog2".to_string(),
-            vec![EList, Input, EList, EList, Dty],
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(
+            &s.ir,
+            "KernelLog2",
+            &[
+                ("shape", &s.elist),
+                ("inp", &s.ir),
+                ("strides", &s.elist),
+                ("out_strides", &s.elist),
+                ("dtype", &s.dtype),
+            ],
         )
     }
 
@@ -1235,10 +1312,18 @@ pub struct KernelSin {
 }
 
 impl EgglogOp for KernelSin {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "KernelSin".to_string(),
-            vec![EList, Input, EList, EList, Dty],
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(
+            &s.ir,
+            "KernelSin",
+            &[
+                ("shape", &s.elist),
+                ("inp", &s.ir),
+                ("strides", &s.elist),
+                ("out_strides", &s.elist),
+                ("dtype", &s.dtype),
+            ],
         )
     }
 
@@ -1374,10 +1459,18 @@ pub struct KernelRecip {
 }
 
 impl EgglogOp for KernelRecip {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "KernelRecip".to_string(),
-            vec![EList, Input, EList, EList, Dty],
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(
+            &s.ir,
+            "KernelRecip",
+            &[
+                ("shape", &s.elist),
+                ("inp", &s.ir),
+                ("strides", &s.elist),
+                ("out_strides", &s.elist),
+                ("dtype", &s.dtype),
+            ],
         )
     }
 
@@ -1513,10 +1606,18 @@ pub struct KernelSqrt {
 }
 
 impl EgglogOp for KernelSqrt {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "KernelSqrt".to_string(),
-            vec![EList, Input, EList, EList, Dty],
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(
+            &s.ir,
+            "KernelSqrt",
+            &[
+                ("shape", &s.elist),
+                ("inp", &s.ir),
+                ("strides", &s.elist),
+                ("out_strides", &s.elist),
+                ("dtype", &s.dtype),
+            ],
         )
     }
 
@@ -1657,10 +1758,20 @@ pub struct KernelMod {
 }
 
 impl EgglogOp for KernelMod {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "KernelMod".to_string(),
-            vec![EList, Input, EList, Input, EList, EList, Dty],
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(
+            &s.ir,
+            "KernelMod",
+            &[
+                ("shape", &s.elist),
+                ("inp_a", &s.ir),
+                ("a_strides", &s.elist),
+                ("inp_b", &s.ir),
+                ("b_strides", &s.elist),
+                ("out_strides", &s.elist),
+                ("dtype", &s.dtype),
+            ],
         )
     }
 
@@ -1798,10 +1909,21 @@ pub struct KernelLessThan {
 }
 
 impl EgglogOp for KernelLessThan {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "KernelLessThan".to_string(),
-            vec![EList, Input, EList, Input, EList, EList, Dty, Dty],
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(
+            &s.ir,
+            "KernelLessThan",
+            &[
+                ("shape", &s.elist),
+                ("inp_a", &s.ir),
+                ("a_strides", &s.elist),
+                ("inp_b", &s.ir),
+                ("b_strides", &s.elist),
+                ("out_strides", &s.elist),
+                ("dtype", &s.dtype),
+                ("b_dtype", &s.dtype),
+            ],
         )
     }
 
@@ -1941,8 +2063,9 @@ pub struct KernelConstant {
 }
 
 impl EgglogOp for KernelConstant {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        ("KernelConstant".to_string(), vec![Float])
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(&s.ir, "KernelConstant", &[("value", &s.f64)])
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -2059,8 +2182,18 @@ pub struct KernelCast {
 }
 
 impl EgglogOp for KernelCast {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        ("KernelCast".to_string(), vec![Input, Expr, Dty, Dty])
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(
+            &s.ir,
+            "KernelCast",
+            &[
+                ("inp", &s.ir),
+                ("size", &s.expr),
+                ("dtype", &s.dtype),
+                ("src_dtype", &s.dtype),
+            ],
+        )
     }
 
     fn rewrites(&self) -> Vec<String> {

@@ -1,6 +1,13 @@
 use super::{MetalKernelOp, DYN_BUFFER_INDEX};
 use luminal::{
-    egglog_utils::SerializedEGraph, op::OpParam::*, op::*, prelude::*, shape::flatten_mul_strides,
+    egglog_utils::{
+        api::{sort, SortDef},
+        base::op_sorts,
+        SerializedEGraph,
+    },
+    op::*,
+    prelude::*,
+    shape::flatten_mul_strides,
 };
 use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, Device, MTLSize};
 
@@ -128,8 +135,8 @@ macro_rules! metal_unary_op {
         }
 
         impl EgglogOp for $name {
-            fn term(&self) -> (String, Vec<OpParam>) {
-                ($op_name.to_string(), vec![EList, Input, EList, EList])
+            fn sort(&self) -> SortDef {
+                op_sorts().unary($op_name)
             }
 
             fn rewrites(&self) -> Vec<String> {
@@ -272,11 +279,8 @@ pub struct MetalAdd {
 }
 
 impl EgglogOp for MetalAdd {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "MetalAdd".to_string(),
-            vec![EList, Input, EList, Input, EList, EList],
-        )
+    fn sort(&self) -> SortDef {
+        op_sorts().binary("MetalAdd")
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -407,11 +411,8 @@ pub struct MetalMul {
 }
 
 impl EgglogOp for MetalMul {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "MetalMul".to_string(),
-            vec![EList, Input, EList, Input, EList, EList],
-        )
+    fn sort(&self) -> SortDef {
+        op_sorts().binary("MetalMul")
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -531,11 +532,8 @@ pub struct MetalMod {
 }
 
 impl EgglogOp for MetalMod {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "MetalMod".to_string(),
-            vec![EList, Input, EList, Input, EList, EList],
-        )
+    fn sort(&self) -> SortDef {
+        op_sorts().binary("MetalMod")
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -655,11 +653,8 @@ pub struct MetalLessThan {
 }
 
 impl EgglogOp for MetalLessThan {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "MetalLessThan".to_string(),
-            vec![EList, Input, EList, Input, EList, EList],
-        )
+    fn sort(&self) -> SortDef {
+        op_sorts().binary("MetalLessThan")
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -783,11 +778,8 @@ pub struct MetalSumReduce {
 }
 
 impl EgglogOp for MetalSumReduce {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "MetalSum".to_string(),
-            vec![EList, Expr, Input, EList, Expr, EList],
-        )
+    fn sort(&self) -> SortDef {
+        op_sorts().reduce("MetalSum")
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -942,11 +934,8 @@ pub struct MetalMaxReduce {
 }
 
 impl EgglogOp for MetalMaxReduce {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "MetalMax".to_string(),
-            vec![EList, Expr, Input, EList, Expr, EList],
-        )
+    fn sort(&self) -> SortDef {
+        op_sorts().reduce("MetalMax")
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -1102,8 +1091,9 @@ pub struct MetalConstant {
 }
 
 impl EgglogOp for MetalConstant {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        ("MetalConstant".to_string(), vec![Float])
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(&s.ir, "MetalConstant", &[("value", &s.f64)])
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -1200,8 +1190,9 @@ pub struct MetalIota {
 }
 
 impl EgglogOp for MetalIota {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        ("MetalIota".to_string(), vec![Expr, Expr])
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(&s.ir, "MetalIota", &[("expr", &s.expr), ("range", &s.expr)])
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -1302,10 +1293,19 @@ pub struct MetalGather {
 }
 
 impl EgglogOp for MetalGather {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "MetalGather".to_string(),
-            vec![EList, Input, EList, Input, EList, EList],
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(
+            &s.ir,
+            "MetalGather",
+            &[
+                ("out_shape", &s.elist),
+                ("indexes", &s.ir),
+                ("index_strides", &s.elist),
+                ("data", &s.ir),
+                ("data_strides", &s.elist),
+                ("out_strides", &s.elist),
+            ],
         )
     }
 
@@ -1452,8 +1452,13 @@ pub struct MetalCast {
 }
 
 impl EgglogOp for MetalCast {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        ("MetalCast".to_string(), vec![Input, Expr, Dty])
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(
+            &s.ir,
+            "MetalCast",
+            &[("inp", &s.ir), ("size", &s.expr), ("dtype", &s.dtype)],
+        )
     }
 
     fn rewrites(&self) -> Vec<String> {

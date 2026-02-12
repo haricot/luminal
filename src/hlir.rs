@@ -1,11 +1,13 @@
+use std::fmt::Display;
 use std::{fmt::Debug, sync::Arc};
 
+use crate::egglog_utils::api::{SortDef, sort};
+use crate::egglog_utils::base::op_sorts;
 use crate::egglog_utils::elist_to_egglog;
 use crate::egglog_utils::extract_dtype;
 use crate::egglog_utils::extract_expr;
 use crate::egglog_utils::extract_expr_list;
 use crate::egglog_utils::list_to_egglog;
-use crate::op::OpParam::*;
 use crate::op::*;
 use crate::prelude::*;
 
@@ -44,9 +46,29 @@ pub struct Input {
     pub dtype: DType,
 }
 
+impl Display for Input {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Input({}{})",
+            if self.label.is_empty() {
+                "".to_string()
+            } else {
+                format!("{}; ", self.label)
+            },
+            self.dtype
+        )
+    }
+}
+
 impl EgglogOp for Input {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        ("Input".to_string(), vec![Int, Str, Dty])
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(
+            &s.ir,
+            "Input",
+            &[("node", &s.i64), ("label", &s.str), ("dtype", &s.dtype)],
+        )
     }
 
     fn cleanup(&self) -> bool {
@@ -107,9 +129,16 @@ pub struct Output {
     pub node: usize,
 }
 
+impl Display for Output {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Output")
+    }
+}
+
 impl EgglogOp for Output {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        ("Output".to_string(), vec![Input, Int])
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(&s.ir, "Output", &[("inp", &s.ir), ("node", &s.i64)])
     }
 
     fn cleanup(&self) -> bool {
@@ -164,9 +193,20 @@ pub struct CustomOpHLIR {
     pub dtype: DType,
 }
 
+impl Display for CustomOpHLIR {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "CustomOp({})", self.dtype)
+    }
+}
+
 impl EgglogOp for CustomOpHLIR {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        ("CustomOpHLIR".to_string(), vec![IList, Int, Dty])
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(
+            &s.ir,
+            "CustomOpHLIR",
+            &[("inputs", &s.ilist), ("id", &s.i64), ("dtype", &s.dtype)],
+        )
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -206,9 +246,13 @@ impl NativeOp for CustomOpHLIR {
 pub struct Constant(pub f32);
 impl Debug for Constant {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Constant(",)?;
-        self.0.fmt(f)?;
-        write!(f, ")")
+        write!(f, "Constant({:?})", self.0)
+    }
+}
+
+impl Display for Constant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
     }
 }
 
@@ -219,8 +263,9 @@ impl HLIROp for Constant {
 }
 
 impl EgglogOp for Constant {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        ("Constant".to_string(), vec![Float])
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(&s.ir, "Constant", &[("value", &s.f64)])
     }
     fn cleanup(&self) -> bool {
         true
@@ -263,14 +308,20 @@ impl NativeOp for Constant {
 
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct Iota(pub Expression, pub Expression);
+impl Display for Iota {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Iota({}; {})", self.0, self.1)
+    }
+}
 impl HLIROp for Iota {
     fn to_egglog(&self, _: &[(NodeIndex, String, ShapeTracker)]) -> String {
         format!("(Iota {} {})", self.0.to_egglog(), self.1.to_egglog())
     }
 }
 impl EgglogOp for Iota {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        ("Iota".to_string(), vec![Expr, Expr])
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(&s.ir, "Iota", &[("expr", &s.expr), ("range", &s.expr)])
     }
 
     fn cleanup(&self) -> bool {
@@ -315,14 +366,24 @@ impl NativeOp for Iota {
 
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct Cast(pub Expression, pub DType);
+impl Display for Cast {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Cast({})", self.1)
+    }
+}
 impl HLIROp for Cast {
     fn to_egglog(&self, inp: &[(NodeIndex, String, ShapeTracker)]) -> String {
         format!("(Cast {} {} ({:?}))", inp[0].1, self.0.to_egglog(), self.1)
     }
 }
 impl EgglogOp for Cast {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        ("Cast".to_string(), vec![Input, Expr, Dty])
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(
+            &s.ir,
+            "Cast",
+            &[("inp", &s.ir), ("size", &s.expr), ("dtype", &s.dtype)],
+        )
     }
 
     fn cleanup(&self) -> bool {
@@ -410,6 +471,11 @@ impl Debug for GraphBreak {
         write!(f, "GraphBreak")
     }
 }
+impl Display for GraphBreak {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "GraphBreak")
+    }
+}
 
 impl HLIROp for GraphBreak {
     fn to_egglog(&self, _: &[(NodeIndex, String, ShapeTracker)]) -> String {
@@ -443,6 +509,11 @@ pub struct Log2 {
     pub shape: Vec<Expression>,
     pub strides: Vec<Expression>,
 }
+impl Display for Log2 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Log2")
+    }
+}
 impl HLIROp for Log2 {
     fn to_egglog(&self, inputs: &[(NodeIndex, String, ShapeTracker)]) -> String {
         format!(
@@ -455,8 +526,8 @@ impl HLIROp for Log2 {
     }
 }
 impl EgglogOp for Log2 {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        ("Log2".to_string(), vec![EList, Input, EList, EList])
+    fn sort(&self) -> SortDef {
+        op_sorts().unary("Log2")
     }
     fn cleanup(&self) -> bool {
         true
@@ -505,6 +576,11 @@ pub struct Exp2 {
     pub shape: Vec<Expression>,
     pub strides: Vec<Expression>,
 }
+impl Display for Exp2 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Exp2")
+    }
+}
 impl HLIROp for Exp2 {
     fn to_egglog(&self, inputs: &[(NodeIndex, String, ShapeTracker)]) -> String {
         format!(
@@ -517,8 +593,8 @@ impl HLIROp for Exp2 {
     }
 }
 impl EgglogOp for Exp2 {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        ("Exp2".to_string(), vec![EList, Input, EList, EList])
+    fn sort(&self) -> SortDef {
+        op_sorts().unary("Exp2")
     }
     fn cleanup(&self) -> bool {
         true
@@ -567,6 +643,11 @@ pub struct Sin {
     pub shape: Vec<Expression>,
     pub strides: Vec<Expression>,
 }
+impl Display for Sin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Sin")
+    }
+}
 impl HLIROp for Sin {
     fn to_egglog(&self, inputs: &[(NodeIndex, String, ShapeTracker)]) -> String {
         format!(
@@ -580,8 +661,8 @@ impl HLIROp for Sin {
 }
 
 impl EgglogOp for Sin {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        ("Sin".to_string(), vec![EList, Input, EList, EList])
+    fn sort(&self) -> SortDef {
+        op_sorts().unary("Sin")
     }
     fn cleanup(&self) -> bool {
         true
@@ -630,6 +711,11 @@ pub struct Recip {
     pub shape: Vec<Expression>,
     pub strides: Vec<Expression>,
 }
+impl Display for Recip {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Recip")
+    }
+}
 impl HLIROp for Recip {
     fn to_egglog(&self, inputs: &[(NodeIndex, String, ShapeTracker)]) -> String {
         format!(
@@ -643,8 +729,8 @@ impl HLIROp for Recip {
 }
 
 impl EgglogOp for Recip {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        ("Recip".to_string(), vec![EList, Input, EList, EList])
+    fn sort(&self) -> SortDef {
+        op_sorts().unary("Recip")
     }
     fn cleanup(&self) -> bool {
         true
@@ -693,6 +779,11 @@ pub struct Sqrt {
     pub shape: Vec<Expression>,
     pub strides: Vec<Expression>,
 }
+impl Display for Sqrt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Sqrt")
+    }
+}
 impl HLIROp for Sqrt {
     fn to_egglog(&self, inputs: &[(NodeIndex, String, ShapeTracker)]) -> String {
         format!(
@@ -706,8 +797,8 @@ impl HLIROp for Sqrt {
 }
 
 impl EgglogOp for Sqrt {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        ("Sqrt".to_string(), vec![EList, Input, EList, EList])
+    fn sort(&self) -> SortDef {
+        op_sorts().unary("Sqrt")
     }
     fn cleanup(&self) -> bool {
         true
@@ -773,6 +864,11 @@ pub struct Add {
     a_strides: Vec<Expression>,
     b_strides: Vec<Expression>,
 }
+impl Display for Add {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Add")
+    }
+}
 impl HLIROp for Add {
     fn to_egglog(&self, inputs: &[(NodeIndex, String, ShapeTracker)]) -> String {
         format!(
@@ -788,11 +884,8 @@ impl HLIROp for Add {
 }
 
 impl EgglogOp for Add {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "Add".to_string(),
-            vec![EList, Input, EList, Input, EList, EList],
-        )
+    fn sort(&self) -> SortDef {
+        op_sorts().binary("Add")
     }
     fn cleanup(&self) -> bool {
         true
@@ -855,6 +948,11 @@ pub struct Mul {
     a_strides: Vec<Expression>,
     b_strides: Vec<Expression>,
 }
+impl Display for Mul {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Mul")
+    }
+}
 impl HLIROp for Mul {
     fn to_egglog(&self, inputs: &[(NodeIndex, String, ShapeTracker)]) -> String {
         format!(
@@ -870,11 +968,8 @@ impl HLIROp for Mul {
 }
 
 impl EgglogOp for Mul {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "Mul".to_string(),
-            vec![EList, Input, EList, Input, EList, EList],
-        )
+    fn sort(&self) -> SortDef {
+        op_sorts().binary("Mul")
     }
     fn cleanup(&self) -> bool {
         true
@@ -937,6 +1032,11 @@ pub struct Mod {
     a_strides: Vec<Expression>,
     b_strides: Vec<Expression>,
 }
+impl Display for Mod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Mod")
+    }
+}
 impl HLIROp for Mod {
     fn to_egglog(&self, inputs: &[(NodeIndex, String, ShapeTracker)]) -> String {
         format!(
@@ -952,11 +1052,8 @@ impl HLIROp for Mod {
 }
 
 impl EgglogOp for Mod {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "Mod".to_string(),
-            vec![EList, Input, EList, Input, EList, EList],
-        )
+    fn sort(&self) -> SortDef {
+        op_sorts().binary("Mod")
     }
     fn cleanup(&self) -> bool {
         true
@@ -1019,6 +1116,11 @@ pub struct LessThan {
     a_strides: Vec<Expression>,
     b_strides: Vec<Expression>,
 }
+impl Display for LessThan {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "LessThan")
+    }
+}
 impl HLIROp for LessThan {
     fn to_egglog(&self, inputs: &[(NodeIndex, String, ShapeTracker)]) -> String {
         format!(
@@ -1034,11 +1136,8 @@ impl HLIROp for LessThan {
 }
 
 impl EgglogOp for LessThan {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "LessThan".to_string(),
-            vec![EList, Input, EList, Input, EList, EList],
-        )
+    fn sort(&self) -> SortDef {
+        op_sorts().binary("LessThan")
     }
     fn cleanup(&self) -> bool {
         true
@@ -1095,6 +1194,11 @@ pub struct Gather {
     index_strides: Vec<Expression>,
     data_strides: Vec<Expression>,
 }
+impl Display for Gather {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Gather")
+    }
+}
 impl HLIROp for Gather {
     fn to_egglog(&self, inputs: &[(NodeIndex, String, ShapeTracker)]) -> String {
         format!(
@@ -1110,10 +1214,19 @@ impl HLIROp for Gather {
 }
 
 impl EgglogOp for Gather {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "Gather".to_string(),
-            vec![Input, EList, EList, Input, EList, EList],
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(
+            &s.ir,
+            "Gather",
+            &[
+                ("indexes", &s.ir),
+                ("index_shape", &s.elist),
+                ("index_strides", &s.elist),
+                ("data", &s.ir),
+                ("data_shape", &s.elist),
+                ("data_strides", &s.elist),
+            ],
         )
     }
     fn cleanup(&self) -> bool {
@@ -1198,6 +1311,11 @@ pub struct SumReduce {
     pub iters: Expression,
     pub iter_stride: Expression,
 }
+impl Display for SumReduce {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SumReduce(dim={})", self.dim)
+    }
+}
 impl HLIROp for SumReduce {
     fn to_egglog(&self, inputs: &[(NodeIndex, String, ShapeTracker)]) -> String {
         let mut reduced_shape = inputs[0].2;
@@ -1219,11 +1337,8 @@ impl HLIROp for SumReduce {
 }
 
 impl EgglogOp for SumReduce {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "Sum".to_string(),
-            vec![EList, Expr, Input, EList, Expr, EList],
-        )
+    fn sort(&self) -> SortDef {
+        op_sorts().reduce("Sum")
     }
     fn cleanup(&self) -> bool {
         true
@@ -1292,6 +1407,11 @@ pub struct MaxReduce {
     pub iters: Expression,
     pub iter_stride: Expression,
 }
+impl Display for MaxReduce {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MaxReduce(dim={})", self.dim)
+    }
+}
 impl HLIROp for MaxReduce {
     fn to_egglog(&self, inputs: &[(NodeIndex, String, ShapeTracker)]) -> String {
         let mut reduced_shape = inputs[0].2;
@@ -1313,11 +1433,8 @@ impl HLIROp for MaxReduce {
 }
 
 impl EgglogOp for MaxReduce {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "Max".to_string(),
-            vec![EList, Expr, Input, EList, Expr, EList],
-        )
+    fn sort(&self) -> SortDef {
+        op_sorts().reduce("Max")
     }
     fn cleanup(&self) -> bool {
         true

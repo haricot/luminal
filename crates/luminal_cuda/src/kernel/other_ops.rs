@@ -7,8 +7,7 @@ use cudarc::{
 };
 use itertools::Itertools;
 use luminal::{
-    egglog_utils::{extract_dtype, extract_expr, extract_expr_list},
-    op::OpParam::*,
+    egglog_utils::{api::{sort, SortDef}, base::op_sorts, extract_dtype, extract_expr, extract_expr_list},
     op::*,
     prelude::*,
 };
@@ -26,11 +25,13 @@ pub struct KernelMeanReduce {
     dtype: DType,
 }
 impl EgglogOp for KernelMeanReduce {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "KernelMean".to_string(),
-            vec![EList, Expr, Input, EList, Expr, EList, Dty],
-        )
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(&s.ir, "KernelMean", &[
+            ("shape", &s.elist), ("iters", &s.expr), ("inp", &s.ir),
+            ("strides", &s.elist), ("iter_stride", &s.expr), ("out_strides", &s.elist),
+            ("dtype", &s.dtype),
+        ])
     }
 
     fn rewrites(&self) -> Vec<String> {

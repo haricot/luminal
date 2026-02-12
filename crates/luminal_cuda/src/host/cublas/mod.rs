@@ -4,11 +4,12 @@ use cudarc::cublas::{
 };
 use cudarc::driver::{CudaStream, DevicePtr};
 use luminal::{
-    egglog_utils::extract_expr,
-    op::{
-        EgglogOp, LLIROp,
-        OpParam::{self, *},
+    egglog_utils::{
+        api::{SortDef, sort},
+        base::op_sorts,
+        extract_expr,
     },
+    op::{EgglogOp, LLIROp},
     prelude::*,
 };
 use std::sync::{Arc, OnceLock};
@@ -64,11 +65,23 @@ impl Default for CuBlasSgemmV2 {
 }
 
 impl EgglogOp for CuBlasSgemmV2 {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "cublasSgemmV2".to_string(),
-            //    A      B      m     n      k  , A input Layout, B input Layout,
-            vec![Input, Input, Expr, Expr, Expr, Str, Str, Expr, Expr, Expr],
+    fn sort(&self) -> SortDef {
+        let s = op_sorts();
+        sort(
+            &s.ir,
+            "cublasSgemmV2",
+            &[
+                ("a", &s.ir),
+                ("b", &s.ir),
+                ("m", &s.expr),
+                ("n", &s.expr),
+                ("k", &s.expr),
+                ("a_layout", &s.str),
+                ("b_layout", &s.str),
+                ("lda", &s.expr),
+                ("ldb", &s.expr),
+                ("ldc", &s.expr),
+            ],
         )
     }
 

@@ -193,8 +193,8 @@ impl std::fmt::Debug for CudaGraphOp {
 }
 
 impl EgglogOp for CudaGraphOp {
-    fn term(&self) -> (String, Vec<luminal::op::OpParam>) {
-        ("CudaGraphOp".to_string(), vec![])
+    fn sort(&self) -> luminal::egglog_utils::api::SortDef {
+        luminal::egglog_utils::api::sort(&luminal::egglog_utils::base::op_sorts().ir, "CudaGraphOp", &[])
     }
 
     fn rewrites(&self) -> Vec<String> {

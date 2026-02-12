@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use itertools::Itertools;
 use rustc_hash::FxHashMap;
 use tinyvec::ArrayVec;
 
@@ -13,7 +14,12 @@ pub struct ShapeTracker {
 
 impl Display for ShapeTracker {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "sh{:?} st{:?}", self.dims, self.strides)
+        write!(
+            f,
+            "({}) : ({})",
+            self.dims.iter().map(|e| format!("{e}")).join(", "),
+            self.strides.iter().map(|e| format!("{e}")).join(", ")
+        )
     }
 }
 

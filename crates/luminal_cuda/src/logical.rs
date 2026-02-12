@@ -1,8 +1,8 @@
 use std::fmt::Debug;
 
-use luminal::op::{
-    EgglogOp,
-    OpParam::{self, *},
+use luminal::{
+    egglog_utils::{api::SortDef, base::op_sorts},
+    op::EgglogOp,
 };
 
 pub type Ops = (Exp, Sigmoid);
@@ -10,8 +10,8 @@ pub type Ops = (Exp, Sigmoid);
 #[derive(Debug, Default)]
 pub struct Exp;
 impl EgglogOp for Exp {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        ("Exp".to_string(), vec![EList, Input, EList, EList])
+    fn sort(&self) -> SortDef {
+        op_sorts().unary("Exp")
     }
 
     fn cleanup(&self) -> bool {
@@ -41,8 +41,8 @@ impl EgglogOp for Exp {
 #[derive(Default, Debug, Clone)]
 pub struct Sigmoid;
 impl EgglogOp for Sigmoid {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        ("Sigmoid".to_string(), vec![EList, Input, EList, EList])
+    fn sort(&self) -> SortDef {
+        op_sorts().unary("Sigmoid")
     }
 
     fn cleanup(&self) -> bool {
