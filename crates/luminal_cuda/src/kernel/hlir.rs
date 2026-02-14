@@ -2651,6 +2651,11 @@ extern \"C\" {{
             * self.embed_dim
     }
 
+    fn output_bytes(&self) -> Expression {
+        // Embed outputs F32
+        self.output_size() * 4
+    }
+
     fn bytes_loaded(&self) -> Expression {
         let batch_size = self
             .batch_shape
