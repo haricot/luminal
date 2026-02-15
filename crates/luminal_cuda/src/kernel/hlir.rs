@@ -66,6 +66,7 @@ pub type Ops = (
     KernelSqrt,
     KernelConstant,
     KernelCast,
+    KernelEmbed,
 );
 
 #[derive(Default, Debug, Clone)]
@@ -2446,4 +2447,237 @@ pub fn generate_dyn_dims_defines(vars: &FxHashSet<char>) -> (String, Vec<char>) 
 /// Returns None if the dim is not in the set.
 pub fn get_dyn_dim_offset(dim: char, sorted_dims: &[char]) -> Option<usize> {
     sorted_dims.iter().position(|&d| d == dim)
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct KernelEmbed {
+    batch_shape: Vec<Expression>,  // batch dimensions (e.g., [seq_len])
+    token_stride: Vec<Expression>, // stride for token_ids input
+    out_stride: Vec<Expression>,   // stride for output
+    embed_dim: Expression,         // embedding dimension
+}
+
+impl EgglogOp for KernelEmbed {
+    fn term(&self) -> (String, Vec<OpParam>) {
+        (
+            "KernelEmbed".to_string(),
+            vec![EList, Input, EList, Input, EList, Expr],
+        )
+    }
+
+    fn rewrites(&self) -> Vec<String> {
+        vec![
+            // Match Gather with Add(Mul(Cast(token_ids), const), Iota) indices
+            "(rule
+                (
+                    (= ?gather (Gather ?indices ?idx_shape ?idx_stride ?embed_table ?embed_shape ?embed_stride))
+                    (= ?indices (Add ?add_shape ?mul_result ?mul_stride ?iota_result ?iota_stride ?add_out_stride))
+                    (= ?mul_result (Mul ?mul_shape ?token_ids_cast ?token_cast_stride ?mul_const ?mul_const_stride ?mul_out_stride))
+                    (= ?token_ids_cast (Cast ?token_ids ?cast_size ?cast_dtype))
+                    (= ?embed_dim (nth_from_end ?embed_shape 0))
+                    (= ?batch_shape (RemoveNthFromEnd ?idx_shape 0))
+                    (= ?out_stride_batch (RemoveNthFromEnd ?add_out_stride 0))
+                )
+                (
+                    (let ?ke (KernelEmbed ?batch_shape ?token_ids ?token_cast_stride ?embed_table ?out_stride_batch ?embed_dim))
+                    (union ?gather ?ke)
+                    (set (dtype ?ke) (F32))
+                )
+                :name \"kernel embed with cast mul\"
+            )".to_string(),
+            // Match Gather with Add(Iota, Mul(Cast(token_ids), const)) indices (reversed order)
+            "(rule
+                (
+                    (= ?gather (Gather ?indices ?idx_shape ?idx_stride ?embed_table ?embed_shape ?embed_stride))
+                    (= ?indices (Add ?add_shape ?iota_result ?iota_stride ?mul_result ?mul_stride ?add_out_stride))
+                    (= ?mul_result (Mul ?mul_shape ?token_ids_cast ?token_cast_stride ?mul_const ?mul_const_stride ?mul_out_stride))
+                    (= ?token_ids_cast (Cast ?token_ids ?cast_size ?cast_dtype))
+                    (= ?embed_dim (nth_from_end ?embed_shape 0))
+                    (= ?batch_shape (RemoveNthFromEnd ?idx_shape 0))
+                    (= ?out_stride_batch (RemoveNthFromEnd ?add_out_stride 0))
+                )
+                (
+                    (let ?ke (KernelEmbed ?batch_shape ?token_ids ?token_cast_stride ?embed_table ?out_stride_batch ?embed_dim))
+                    (union ?gather ?ke)
+                    (set (dtype ?ke) (F32))
+                )
+                :name \"kernel embed with cast mul reversed\"
+            )".to_string(),
+            // Match Gather with Add(Mul(token_ids, const), Iota) indices (no Cast)
+            "(rule
+                (
+                    (= ?gather (Gather ?indices ?idx_shape ?idx_stride ?embed_table ?embed_shape ?embed_stride))
+                    (= ?indices (Add ?add_shape ?mul_result ?mul_stride ?iota_result ?iota_stride ?add_out_stride))
+                    (= ?mul_result (Mul ?mul_shape ?token_ids ?token_stride ?mul_const ?mul_const_stride ?mul_out_stride))
+                    (= ?embed_dim (nth_from_end ?embed_shape 0))
+                    (= ?batch_shape (RemoveNthFromEnd ?idx_shape 0))
+                    (= ?out_stride_batch (RemoveNthFromEnd ?add_out_stride 0))
+                )
+                (
+                    (let ?ke (KernelEmbed ?batch_shape ?token_ids ?token_stride ?embed_table ?out_stride_batch ?embed_dim))
+                    (union ?gather ?ke)
+                    (set (dtype ?ke) (F32))
+                )
+                :name \"kernel embed with mul\"
+            )".to_string(),
+            // Match Gather with Add(Iota, Mul(token_ids, const)) indices (reversed order, no Cast)
+            "(rule
+                (
+                    (= ?gather (Gather ?indices ?idx_shape ?idx_stride ?embed_table ?embed_shape ?embed_stride))
+                    (= ?indices (Add ?add_shape ?iota_result ?iota_stride ?mul_result ?mul_stride ?add_out_stride))
+                    (= ?mul_result (Mul ?mul_shape ?token_ids ?token_stride ?mul_const ?mul_const_stride ?mul_out_stride))
+                    (= ?embed_dim (nth_from_end ?embed_shape 0))
+                    (= ?batch_shape (RemoveNthFromEnd ?idx_shape 0))
+                    (= ?out_stride_batch (RemoveNthFromEnd ?add_out_stride 0))
+                )
+                (
+                    (let ?ke (KernelEmbed ?batch_shape ?token_ids ?token_stride ?embed_table ?out_stride_batch ?embed_dim))
+                    (union ?gather ?ke)
+                    (set (dtype ?ke) (F32))
+                )
+                :name \"kernel embed with mul reversed\"
+            )".to_string(),
+        ]
+    }
+
+    fn cleanup(&self) -> bool {
+        false
+    }
+
+    fn extract<'a>(
+        &self,
+        egraph: &'a SerializedEGraph,
+        children: &[&'a ENodeId],
+        list_cache: &mut FxHashMap<&'a ENodeId, Vec<Expression>>,
+        expr_cache: &mut FxHashMap<&'a ENodeId, Expression>,
+    ) -> (LLIROp, Vec<&'a ENodeId>) {
+        (
+            LLIROp::new::<dyn KernelOp>(Box::new(Self {
+                batch_shape: extract_expr_list(egraph, children[0], list_cache, expr_cache)
+                    .unwrap(),
+                token_stride: extract_expr_list(egraph, children[2], list_cache, expr_cache)
+                    .unwrap(),
+                out_stride: extract_expr_list(egraph, children[4], list_cache, expr_cache).unwrap(),
+                embed_dim: extract_expr(egraph, children[5], expr_cache).unwrap(),
+            })),
+            vec![children[1], children[3]], // token_ids, embedding_table
+        )
+    }
+}
+
+impl KernelOp for KernelEmbed {
+    fn compile(
+        &self,
+        stream: &Arc<CudaStream>,
+        compile_cache: &mut FxHashMap<String, (Arc<CudaModule>, CudaFunction)>,
+    ) -> (
+        CudaFunction,
+        Arc<CudaModule>,
+        String,
+        (Expression, Expression, Expression),
+        (Expression, Expression, Expression),
+        Expression,
+        FxHashMap<char, CudaSlice<u8>>,
+    ) {
+        let batch_size = self
+            .batch_shape
+            .iter()
+            .copied()
+            .product::<Expression>()
+            .max(1);
+        let vars = self
+            .batch_shape
+            .iter()
+            .flat_map(|e| e.dyn_vars())
+            .chain(self.token_stride.iter().flat_map(|e| e.dyn_vars()))
+            .chain(self.out_stride.iter().flat_map(|e| e.dyn_vars()))
+            .chain(self.embed_dim.dyn_vars())
+            .collect::<FxHashSet<_>>();
+        let token_offset_expr =
+            flatten_mul_strides(&self.batch_shape, &self.token_stride).to_kernel();
+        let out_offset_expr = flatten_mul_strides(&self.batch_shape, &self.out_stride).to_kernel();
+        let embed_dim_expr = self.embed_dim.to_kernel();
+        let kernel = format!(
+            "
+{}
+extern \"C\" {{
+    __global__ void embed(float *out, const int *token_ids, const float *embed_table) {{
+        long long idx = (long long)blockIdx.x * blockDim.x + threadIdx.x;
+        long long embed_dim = {embed_dim_expr};
+        long long batch_idx = idx / embed_dim;
+        long long embed_idx = idx % embed_dim;
+        long long const_z = batch_idx;
+        long long token_offset = {token_offset_expr};
+        long long out_offset = {out_offset_expr};
+        int token_id = token_ids[token_offset];
+        out[out_offset * embed_dim + embed_idx] = embed_table[(long long)token_id * embed_dim + embed_idx];
+    }}
+}}",
+            vars.iter()
+                .map(|i| format!("__constant__ int const_{i}[1];"))
+                .join("\n"),
+        );
+        let (module, func) = if let Some((module, func)) = compile_cache.get(&kernel) {
+            (module.clone(), func.clone())
+        } else {
+            let ptx = compile_ptx(&kernel).unwrap();
+            let module = stream.context().load_module(ptx).unwrap();
+            let func = module.load_function("embed").unwrap();
+            compile_cache.insert(kernel.clone(), (module.clone(), func.clone()));
+            (module, func)
+        };
+        let constants = vars
+            .into_iter()
+            .map(|d| (d, module.get_global(&format!("const_{d}"), stream).unwrap()))
+            .collect();
+        let total_threads = batch_size * self.embed_dim;
+        (
+            func,
+            module,
+            kernel,
+            (total_threads, 1.into(), 1.into()),
+            (1.into(), 1.into(), 1.into()),
+            0.into(),
+            constants,
+        )
+    }
+
+    fn output_size(&self) -> Expression {
+        self.batch_shape
+            .iter()
+            .copied()
+            .product::<Expression>()
+            .max(1)
+            * self.embed_dim
+    }
+
+    fn output_bytes(&self) -> Expression {
+        // Embed outputs F32
+        self.output_size() * 4
+    }
+
+    fn bytes_loaded(&self) -> Expression {
+        let batch_size = self
+            .batch_shape
+            .iter()
+            .copied()
+            .product::<Expression>()
+            .max(1);
+        // Load: 1 token ID (4 bytes) per batch + 1 embedding row (embed_dim * 4 bytes) per batch
+        batch_size * (4 + self.embed_dim * 4)
+    }
+
+    fn bytes_stored(&self) -> Expression {
+        // Store: 1 embedding row per batch element
+        self.output_size() * 4
+    }
+
+    fn flops(&self) -> Expression {
+        // No FLOPs - just memory copy
+        0.into()
+    }
+
+    fn kernel_name(&self) -> &'static str {
+        "Embed"
+    }
 }
