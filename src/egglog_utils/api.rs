@@ -3,16 +3,14 @@ use std::collections::HashMap;
 // ========== Core Types ==========
 
 /// A sort class (type) — either a builtin like `i64` or a user-defined datatype like `Expr`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct SortClass {
-    pub name: String,
+    pub name: &'static str,
 }
 
 impl SortClass {
-    pub fn new(name: &str) -> Self {
-        Self {
-            name: name.to_string(),
-        }
+    pub const fn new(name: &'static str) -> Self {
+        Self { name }
     }
 }
 
@@ -188,6 +186,26 @@ impl Rule {
         self.facts.extend(conditions);
         self
     }
+
+    /// Sugar for `.action(Action::Set(func_app, value))`.
+    pub fn set(self, func_app: Term, value: Term) -> Self {
+        self.action(Action::Set(func_app, value))
+    }
+
+    /// Sugar for `.action(Action::Union(a, b))`.
+    pub fn union(self, a: Term, b: Term) -> Self {
+        self.action(Action::Union(a, b))
+    }
+
+    /// Sugar for `.fact(eq(var, term))` — binds a pattern variable via equality.
+    pub fn r#let(self, var: Term, term: Term) -> Self {
+        self.fact(eq(var, term))
+    }
+
+    /// Convert this rule to its egglog string representation.
+    pub fn to_egglog_string(&self) -> String {
+        rule_to_egglog(self)
+    }
 }
 
 /// A function declaration in egglog.
@@ -262,11 +280,11 @@ pub fn sort(class: &SortClass, name: &str, args: &[(&str, &SortClass)]) -> SortD
         }
         fields.push(Field {
             name: arg_name.to_string(),
-            sort: arg_sort.name.clone(),
+            sort: arg_sort.name.to_string(),
         });
     }
     SortDef {
-        class: class.name.clone(),
+        class: class.name.to_string(),
         name: name.to_string(),
         fields,
     }
@@ -324,22 +342,51 @@ pub fn unit() -> Term {
     Term::Lit(Literal::Unit)
 }
 
-/// Raw s-expression application (for egglog builtins like `+`, `-`, `len`, etc.).
-pub fn app(name: &str, args: Vec<Term>) -> Term {
+/// Create a function/builtin definition (for term construction only, not registered as a sort).
+pub fn func(name: &str, arg_names: &[&str]) -> SortDef {
+    SortDef {
+        class: String::new(),
+        name: name.to_string(),
+        fields: arg_names
+            .iter()
+            .map(|n| Field {
+                name: n.to_string(),
+                sort: String::new(),
+            })
+            .collect(),
+    }
+}
+
+/// Sort/function application — builds a term from a `SortDef` and positional arguments.
+pub fn app(sort: &SortDef, args: Vec<Term>) -> Term {
+    assert_eq!(
+        args.len(),
+        sort.fields.len(),
+        "`{}` expects {} args, got {}",
+        sort.name,
+        sort.fields.len(),
+        args.len()
+    );
     Term::App {
-        variant: name.to_string(),
+        variant: sort.name.clone(),
         args,
     }
 }
 
 /// Egglog equality: `(= a b)`
 pub fn eq(a: Term, b: Term) -> Term {
-    app("=", vec![a, b])
+    Term::App {
+        variant: "=".to_string(),
+        args: vec![a, b],
+    }
 }
 
 /// Egglog inequality: `(!= a b)`
 pub fn neq(a: Term, b: Term) -> Term {
-    app("!=", vec![a, b])
+    Term::App {
+        variant: "!=".to_string(),
+        args: vec![a, b],
+    }
 }
 
 // ========== Code Generation ==========
@@ -483,7 +530,7 @@ impl Program {
             panic!("class `{}` is already registered", class.name);
         }
         self.classes.push(ProgramSortClass {
-            name: class.name.clone(),
+            name: class.name.to_string(),
             kind: ProgramSortKind::User,
             variants: Vec::new(),
         });

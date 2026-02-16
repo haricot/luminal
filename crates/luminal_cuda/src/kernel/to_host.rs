@@ -194,7 +194,7 @@ impl std::fmt::Debug for CudaGraphOp {
 
 impl EgglogOp for CudaGraphOp {
     fn sort(&self) -> luminal::egglog_utils::api::SortDef {
-        luminal::egglog_utils::api::sort(&luminal::egglog_utils::base::op_sorts().ir, "CudaGraphOp", &[])
+        luminal::egglog_utils::api::sort(&luminal::egglog_utils::base::IR, "CudaGraphOp", &[])
     }
 
     fn rewrites(&self) -> Vec<String> {

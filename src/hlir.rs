@@ -1,8 +1,8 @@
 use std::fmt::Display;
 use std::{fmt::Debug, sync::Arc};
 
-use crate::egglog_utils::api::{SortDef, sort};
-use crate::egglog_utils::base::op_sorts;
+use crate::egglog_utils::api::{SortDef, Term, app, eq, rule, sort, v};
+use crate::egglog_utils::base::{DTYPE, ELIST, EXPRESSION, F64, I64, ILIST, IR, OP_SORTS, SORTS, STRING};
 use crate::egglog_utils::elist_to_egglog;
 use crate::egglog_utils::extract_dtype;
 use crate::egglog_utils::extract_expr;
@@ -13,6 +13,54 @@ use crate::prelude::*;
 
 use as_any::AsAny;
 use itertools::Itertools;
+
+/// Helper: build the `(dtype <expr>)` function application term.
+fn dtype_term(e: Term) -> Term {
+    app(&OP_SORTS.f_dtype, vec![e])
+}
+
+/// Helper: build a dtype propagation rule for an op.
+/// Matches the op, reads dtype from the named source field, and sets it on the op.
+fn dtype_propagation_rule(sort: &SortDef, dtype_source: &str) -> String {
+    let field_vars: Vec<Term> = sort
+        .fields
+        .iter()
+        .map(|f| v(&format!("?{}", f.name)))
+        .collect();
+    rule()
+        .facts(vec![
+            eq(v("?e"), app(sort, field_vars)),
+            eq(v("?dty"), dtype_term(v(&format!("?{dtype_source}")))),
+        ])
+        .set(dtype_term(v("?e")), v("?dty"))
+        .to_egglog_string()
+}
+
+/// Helper: build a dtype-from-field rule (dtype comes directly from a field variable).
+fn dtype_from_field_rule(sort: &SortDef, dtype_field: &str) -> String {
+    let field_vars: Vec<Term> = sort
+        .fields
+        .iter()
+        .map(|f| v(&format!("?{}", f.name)))
+        .collect();
+    rule()
+        .fact(eq(v("?e"), app(sort, field_vars)))
+        .set(dtype_term(v("?e")), v(&format!("?{dtype_field}")))
+        .to_egglog_string()
+}
+
+/// Helper: build a rule that sets a fixed dtype on an op.
+fn dtype_fixed_rule(sort: &SortDef, dtype_sort: &SortDef) -> String {
+    let field_vars: Vec<Term> = sort
+        .fields
+        .iter()
+        .map(|f| v(&format!("?{}", f.name)))
+        .collect();
+    rule()
+        .fact(eq(v("?e"), app(sort, field_vars)))
+        .set(dtype_term(v("?e")), app(dtype_sort, vec![]))
+        .to_egglog_string()
+}
 use num_traits::Float;
 use petgraph::{Direction, algo::toposort, prelude::StableGraph, visit::EdgeRef};
 use rustc_hash::FxHashMap;
@@ -63,11 +111,10 @@ impl Display for Input {
 
 impl EgglogOp for Input {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
         sort(
-            &s.ir,
+            &IR,
             "Input",
-            &[("node", &s.i64), ("label", &s.str), ("dtype", &s.dtype)],
+            &[("node", &I64), ("label", &STRING), ("dtype", &DTYPE)],
         )
     }
 
@@ -76,13 +123,7 @@ impl EgglogOp for Input {
     }
 
     fn rewrites(&self) -> Vec<String> {
-        vec![
-            "(rule
-           ((= ?e (Input ?node ?label ?dty)))
-           ((set (dtype ?e) ?dty))
-        )"
-            .to_string(),
-        ]
+        vec![dtype_from_field_rule(&self.sort(), "dtype")]
     }
 
     fn extract<'a>(
@@ -137,8 +178,7 @@ impl Display for Output {
 
 impl EgglogOp for Output {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
-        sort(&s.ir, "Output", &[("inp", &s.ir), ("node", &s.i64)])
+        sort(&IR, "Output", &[("inp", &IR), ("node", &I64)])
     }
 
     fn cleanup(&self) -> bool {
@@ -146,13 +186,7 @@ impl EgglogOp for Output {
     }
 
     fn rewrites(&self) -> Vec<String> {
-        vec![
-            "(rule
-           ((= ?e (Output ?inp ?node)) (= ?dty (dtype ?inp)))
-           ((set (dtype ?e) ?dty))
-        )"
-            .to_string(),
-        ]
+        vec![dtype_propagation_rule(&self.sort(), "inp")]
     }
 
     fn extract<'a>(
@@ -201,22 +235,15 @@ impl Display for CustomOpHLIR {
 
 impl EgglogOp for CustomOpHLIR {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
         sort(
-            &s.ir,
+            &IR,
             "CustomOpHLIR",
-            &[("inputs", &s.ilist), ("id", &s.i64), ("dtype", &s.dtype)],
+            &[("inputs", &ILIST), ("id", &I64), ("dtype", &DTYPE)],
         )
     }
 
     fn rewrites(&self) -> Vec<String> {
-        vec![
-            "(rule
-           ((= ?e (CustomOpHLIR ?a ?b ?dty)))
-           ((set (dtype ?e) ?dty))
-        )"
-            .to_string(),
-        ]
+        vec![dtype_from_field_rule(&self.sort(), "dtype")]
     }
 
     fn cleanup(&self) -> bool {
@@ -264,21 +291,14 @@ impl HLIROp for Constant {
 
 impl EgglogOp for Constant {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
-        sort(&s.ir, "Constant", &[("value", &s.f64)])
+        sort(&IR, "Constant", &[("value", &F64)])
     }
     fn cleanup(&self) -> bool {
         true
     }
 
     fn rewrites(&self) -> Vec<String> {
-        vec![
-            "(rule
-           ((= ?e (Constant ?f)))
-           ((set (dtype ?e) (F32)))
-        )"
-            .to_string(),
-        ]
+        vec![dtype_fixed_rule(&self.sort(), &SORTS.f32_dt)]
     }
     fn extract<'a>(
         &'a self,
@@ -320,8 +340,7 @@ impl HLIROp for Iota {
 }
 impl EgglogOp for Iota {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
-        sort(&s.ir, "Iota", &[("expr", &s.expr), ("range", &s.expr)])
+        sort(&IR, "Iota", &[("expr", &EXPRESSION), ("range", &EXPRESSION)])
     }
 
     fn cleanup(&self) -> bool {
@@ -329,13 +348,7 @@ impl EgglogOp for Iota {
     }
 
     fn rewrites(&self) -> Vec<String> {
-        vec![
-            "(rule
-           ((= ?e (Iota ?expr ?range)))
-           ((set (dtype ?e) (Int)))
-        )"
-            .to_string(),
-        ]
+        vec![dtype_fixed_rule(&self.sort(), &SORTS.int_dt)]
     }
     fn extract<'a>(
         &'a self,
@@ -378,11 +391,10 @@ impl HLIROp for Cast {
 }
 impl EgglogOp for Cast {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
         sort(
-            &s.ir,
+            &IR,
             "Cast",
-            &[("inp", &s.ir), ("size", &s.expr), ("dtype", &s.dtype)],
+            &[("inp", &IR), ("size", &EXPRESSION), ("dtype", &DTYPE)],
         )
     }
 
@@ -391,13 +403,7 @@ impl EgglogOp for Cast {
     }
 
     fn rewrites(&self) -> Vec<String> {
-        vec![
-            "(rule
-           ((= ?e (Cast ?inp ?size ?dty)))
-           ((set (dtype ?e) ?dty))
-        )"
-            .to_string(),
-        ]
+        vec![dtype_from_field_rule(&self.sort(), "dtype")]
     }
     fn extract<'a>(
         &'a self,
@@ -527,19 +533,13 @@ impl HLIROp for Log2 {
 }
 impl EgglogOp for Log2 {
     fn sort(&self) -> SortDef {
-        op_sorts().unary("Log2")
+        OP_SORTS.unary("Log2")
     }
     fn cleanup(&self) -> bool {
         true
     }
     fn rewrites(&self) -> Vec<String> {
-        vec![
-            "(rule
-           ((= ?e (Log2 ?shape ?inp ?a ?b)) (= ?dty (dtype ?inp)))
-           ((set (dtype ?e) ?dty))
-        )"
-            .to_string(),
-        ]
+        vec![dtype_propagation_rule(&self.sort(), "inp")]
     }
     fn extract<'a>(
         &'a self,
@@ -594,19 +594,13 @@ impl HLIROp for Exp2 {
 }
 impl EgglogOp for Exp2 {
     fn sort(&self) -> SortDef {
-        op_sorts().unary("Exp2")
+        OP_SORTS.unary("Exp2")
     }
     fn cleanup(&self) -> bool {
         true
     }
     fn rewrites(&self) -> Vec<String> {
-        vec![
-            "(rule
-           ((= ?e (Exp2 ?shape ?inp ?a ?b)) (= ?dty (dtype ?inp)))
-           ((set (dtype ?e) ?dty))
-        )"
-            .to_string(),
-        ]
+        vec![dtype_propagation_rule(&self.sort(), "inp")]
     }
     fn extract<'a>(
         &'a self,
@@ -662,19 +656,13 @@ impl HLIROp for Sin {
 
 impl EgglogOp for Sin {
     fn sort(&self) -> SortDef {
-        op_sorts().unary("Sin")
+        OP_SORTS.unary("Sin")
     }
     fn cleanup(&self) -> bool {
         true
     }
     fn rewrites(&self) -> Vec<String> {
-        vec![
-            "(rule
-           ((= ?e (Sin ?shape ?inp ?a ?b)) (= ?dty (dtype ?inp)))
-           ((set (dtype ?e) ?dty))
-        )"
-            .to_string(),
-        ]
+        vec![dtype_propagation_rule(&self.sort(), "inp")]
     }
     fn extract<'a>(
         &'a self,
@@ -730,19 +718,13 @@ impl HLIROp for Recip {
 
 impl EgglogOp for Recip {
     fn sort(&self) -> SortDef {
-        op_sorts().unary("Recip")
+        OP_SORTS.unary("Recip")
     }
     fn cleanup(&self) -> bool {
         true
     }
     fn rewrites(&self) -> Vec<String> {
-        vec![
-            "(rule
-           ((= ?e (Recip ?shape ?inp ?a ?b)) (= ?dty (dtype ?inp)))
-           ((set (dtype ?e) ?dty))
-        )"
-            .to_string(),
-        ]
+        vec![dtype_propagation_rule(&self.sort(), "inp")]
     }
     fn extract<'a>(
         &'a self,
@@ -798,19 +780,13 @@ impl HLIROp for Sqrt {
 
 impl EgglogOp for Sqrt {
     fn sort(&self) -> SortDef {
-        op_sorts().unary("Sqrt")
+        OP_SORTS.unary("Sqrt")
     }
     fn cleanup(&self) -> bool {
         true
     }
     fn rewrites(&self) -> Vec<String> {
-        vec![
-            "(rule
-           ((= ?e (Sqrt ?shape ?inp ?a ?b)) (= ?dty (dtype ?inp)))
-           ((set (dtype ?e) ?dty))
-        )"
-            .to_string(),
-        ]
+        vec![dtype_propagation_rule(&self.sort(), "inp")]
     }
     fn extract<'a>(
         &'a self,
@@ -885,19 +861,13 @@ impl HLIROp for Add {
 
 impl EgglogOp for Add {
     fn sort(&self) -> SortDef {
-        op_sorts().binary("Add")
+        OP_SORTS.binary("Add")
     }
     fn cleanup(&self) -> bool {
         true
     }
     fn rewrites(&self) -> Vec<String> {
-        vec![
-            "(rule
-           ((= ?e (Add ?shape ?inp_a ?a ?inp_b ?b ?o)) (= ?dty (dtype ?inp_a)))
-           ((set (dtype ?e) ?dty))
-        )"
-            .to_string(),
-        ]
+        vec![dtype_propagation_rule(&self.sort(), "inp_a")]
     }
     fn extract<'a>(
         &'a self,
@@ -969,19 +939,13 @@ impl HLIROp for Mul {
 
 impl EgglogOp for Mul {
     fn sort(&self) -> SortDef {
-        op_sorts().binary("Mul")
+        OP_SORTS.binary("Mul")
     }
     fn cleanup(&self) -> bool {
         true
     }
     fn rewrites(&self) -> Vec<String> {
-        vec![
-            "(rule
-           ((= ?e (Mul ?shape ?inp_a ?a ?inp_b ?b ?o)) (= ?dty (dtype ?inp_a)))
-           ((set (dtype ?e) ?dty))
-        )"
-            .to_string(),
-        ]
+        vec![dtype_propagation_rule(&self.sort(), "inp_a")]
     }
     fn extract<'a>(
         &'a self,
@@ -1053,19 +1017,13 @@ impl HLIROp for Mod {
 
 impl EgglogOp for Mod {
     fn sort(&self) -> SortDef {
-        op_sorts().binary("Mod")
+        OP_SORTS.binary("Mod")
     }
     fn cleanup(&self) -> bool {
         true
     }
     fn rewrites(&self) -> Vec<String> {
-        vec![
-            "(rule
-           ((= ?e (Mod ?shape ?inp_a ?a ?inp_b ?b ?o)) (= ?dty (dtype ?inp_a)))
-           ((set (dtype ?e) ?dty))
-        )"
-            .to_string(),
-        ]
+        vec![dtype_propagation_rule(&self.sort(), "inp_a")]
     }
     fn extract<'a>(
         &'a self,
@@ -1137,20 +1095,14 @@ impl HLIROp for LessThan {
 
 impl EgglogOp for LessThan {
     fn sort(&self) -> SortDef {
-        op_sorts().binary("LessThan")
+        OP_SORTS.binary("LessThan")
     }
     fn cleanup(&self) -> bool {
         true
     }
     fn rewrites(&self) -> Vec<String> {
-        vec![
-            // Comparison operations always output Bool
-            "(rule
-           ((= ?e (LessThan ?shape ?inp_a ?a ?inp_b ?b ?o)))
-           ((set (dtype ?e) (Bool)))
-        )"
-            .to_string(),
-        ]
+        // Comparison operations always output Bool
+        vec![dtype_fixed_rule(&self.sort(), &SORTS.bool_dt)]
     }
     fn extract<'a>(
         &'a self,
@@ -1215,17 +1167,16 @@ impl HLIROp for Gather {
 
 impl EgglogOp for Gather {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
         sort(
-            &s.ir,
+            &IR,
             "Gather",
             &[
-                ("indexes", &s.ir),
-                ("index_shape", &s.elist),
-                ("index_strides", &s.elist),
-                ("data", &s.ir),
-                ("data_shape", &s.elist),
-                ("data_strides", &s.elist),
+                ("indexes", &IR),
+                ("index_shape", &ELIST),
+                ("index_strides", &ELIST),
+                ("data", &IR),
+                ("data_shape", &ELIST),
+                ("data_strides", &ELIST),
             ],
         )
     }
@@ -1233,13 +1184,7 @@ impl EgglogOp for Gather {
         true
     }
     fn rewrites(&self) -> Vec<String> {
-        vec![
-            "(rule
-           ((= ?e (Gather ?indexes ?index_shape ?index_stride ?data ?data_shape ?data_stride)) (= ?dty (dtype ?data)))
-           ((set (dtype ?e) ?dty))
-        )"
-            .to_string(),
-        ]
+        vec![dtype_propagation_rule(&self.sort(), "data")]
     }
     fn extract<'a>(
         &'a self,
@@ -1338,19 +1283,13 @@ impl HLIROp for SumReduce {
 
 impl EgglogOp for SumReduce {
     fn sort(&self) -> SortDef {
-        op_sorts().reduce("Sum")
+        OP_SORTS.reduce("Sum")
     }
     fn cleanup(&self) -> bool {
         true
     }
     fn rewrites(&self) -> Vec<String> {
-        vec![
-            "(rule
-           ((= ?e (Sum ?shape ?iters ?inp ?a ?stride ?o)) (= ?dty (dtype ?inp)))
-           ((set (dtype ?e) ?dty))
-        )"
-            .to_string(),
-        ]
+        vec![dtype_propagation_rule(&self.sort(), "inp")]
     }
     fn extract<'a>(
         &'a self,
@@ -1434,19 +1373,13 @@ impl HLIROp for MaxReduce {
 
 impl EgglogOp for MaxReduce {
     fn sort(&self) -> SortDef {
-        op_sorts().reduce("Max")
+        OP_SORTS.reduce("Max")
     }
     fn cleanup(&self) -> bool {
         true
     }
     fn rewrites(&self) -> Vec<String> {
-        vec![
-            "(rule
-           ((= ?e (Max ?shape ?iters ?inp ?a ?stride ?o)) (= ?dty (dtype ?inp)))
-           ((set (dtype ?e) ?dty))
-        )"
-            .to_string(),
-        ]
+        vec![dtype_propagation_rule(&self.sort(), "inp")]
     }
     fn extract<'a>(
         &'a self,

@@ -3,39 +3,50 @@ use std::sync::LazyLock;
 use super::api::*;
 use crate::shape::{self, ToShape};
 
-static SORTS: LazyLock<BaseSorts> = LazyLock::new(BaseSorts::new);
+// ---- Sort classes (pub const) ----
+
+pub const IR: SortClass = SortClass::new("IR");
+pub const ILIST: SortClass = SortClass::new("IList");
+pub const EXPRESSION: SortClass = SortClass::new("Expression");
+pub const ELIST: SortClass = SortClass::new("EList");
+pub const DTYPE: SortClass = SortClass::new("DType");
+pub const I64: SortClass = SortClass::new("i64");
+pub const F64: SortClass = SortClass::new("f64");
+pub const STRING: SortClass = SortClass::new("String");
+
+pub static SORTS: LazyLock<BaseSorts> = LazyLock::new(BaseSorts::new);
 
 // ---- Egglog primitive operations ----
 
 pub fn padd(a: Term, b: Term) -> Term {
-    app("+", vec![a, b])
+    app(&SORTS.p_add, vec![a, b])
 }
 pub fn psub(a: Term, b: Term) -> Term {
-    app("-", vec![a, b])
+    app(&SORTS.p_sub, vec![a, b])
 }
 pub fn pmul(a: Term, b: Term) -> Term {
-    app("*", vec![a, b])
+    app(&SORTS.p_mul, vec![a, b])
 }
 pub fn pdiv(a: Term, b: Term) -> Term {
-    app("/", vec![a, b])
+    app(&SORTS.p_div, vec![a, b])
 }
 pub fn pmod(a: Term, b: Term) -> Term {
-    app("%", vec![a, b])
+    app(&SORTS.p_mod, vec![a, b])
 }
 pub fn pmax(a: Term, b: Term) -> Term {
-    app("max", vec![a, b])
+    app(&SORTS.p_max, vec![a, b])
 }
 pub fn pmin(a: Term, b: Term) -> Term {
-    app("min", vec![a, b])
+    app(&SORTS.p_min, vec![a, b])
 }
 pub fn pand(a: Term, b: Term) -> Term {
-    app("&", vec![a, b])
+    app(&SORTS.p_and, vec![a, b])
 }
 pub fn plt(a: Term, b: Term) -> Term {
-    app("<", vec![a, b])
+    app(&SORTS.p_lt, vec![a, b])
 }
 pub fn pgte(a: Term, b: Term) -> Term {
-    app(">=", vec![a, b])
+    app(&SORTS.p_gte, vec![a, b])
 }
 pub fn peq(a: Term, b: Term) -> Term {
     eq(a, b)
@@ -47,13 +58,13 @@ pub fn pneq(a: Term, b: Term) -> Term {
 // ---- Egglog function applications ----
 
 pub fn len_f(l: Term) -> Term {
-    app("len", vec![l])
+    app(&SORTS.f_len, vec![l])
 }
 pub fn nth_f(l: Term, i: Term) -> Term {
-    app("nth_from_end", vec![l, i])
+    app(&SORTS.f_nth, vec![l, i])
 }
 pub fn nelem_f(l: Term) -> Term {
-    app("n_elements", vec![l])
+    app(&SORTS.f_nelem, vec![l])
 }
 
 // ---- Expression term constructors ----
@@ -186,11 +197,6 @@ pub fn shape_to_elist(shape: impl ToShape) -> Term {
 /// All sort classes, sort definitions, and convenience term constructors
 /// for the base Expression/EList/DType egglog types.
 pub struct BaseSorts {
-    // Sort classes
-    pub expr: SortClass,
-    pub elist: SortClass,
-    pub dtype: SortClass,
-
     // Expression variants
     pub m_num: SortDef,
     pub m_float: SortDef,
@@ -225,77 +231,154 @@ pub struct BaseSorts {
     pub bf16_dt: SortDef,
     pub int_dt: SortDef,
     pub bool_dt: SortDef,
+
+    // Egglog builtin primitives (for term construction only)
+    pub p_add: SortDef,
+    pub p_sub: SortDef,
+    pub p_mul: SortDef,
+    pub p_div: SortDef,
+    pub p_mod: SortDef,
+    pub p_max: SortDef,
+    pub p_min: SortDef,
+    pub p_and: SortDef,
+    pub p_lt: SortDef,
+    pub p_gte: SortDef,
+
+    // Egglog function defs (for term construction only)
+    pub f_len: SortDef,
+    pub f_nth: SortDef,
+    pub f_nelem: SortDef,
 }
 
 impl BaseSorts {
     pub fn new() -> Self {
-        let expr = SortClass::new("Expression");
-        let elist = SortClass::new("EList");
-        let dtype = SortClass::new("DType");
-        let int_s = BuiltinSort::I64.sort_class();
-        let f64_s = BuiltinSort::F64.sort_class();
-        let str_s = BuiltinSort::String.sort_class();
-
         Self {
-            m_num: sort(&expr, "MNum", &[("n", &int_s)]),
-            m_float: sort(&expr, "MFloat", &[("n", &f64_s)]),
-            m_iter: sort(&expr, "MIter", &[]),
-            m_var: sort(&expr, "MVar", &[("name", &str_s)]),
-            m_add: sort(&expr, "MAdd", &[("a", &expr), ("b", &expr)]),
-            m_sub: sort(&expr, "MSub", &[("a", &expr), ("b", &expr)]),
-            m_mul: sort(&expr, "MMul", &[("a", &expr), ("b", &expr)]),
-            m_ceildiv: sort(&expr, "MCeilDiv", &[("a", &expr), ("b", &expr)]),
-            m_div: sort(&expr, "MDiv", &[("a", &expr), ("b", &expr)]),
-            m_mod: sort(&expr, "MMod", &[("a", &expr), ("b", &expr)]),
-            m_min: sort(&expr, "MMin", &[("a", &expr), ("b", &expr)]),
-            m_max: sort(&expr, "MMax", &[("a", &expr), ("b", &expr)]),
-            m_and: sort(&expr, "MAnd", &[("a", &expr), ("b", &expr)]),
-            m_or: sort(&expr, "MOr", &[("a", &expr), ("b", &expr)]),
-            m_gte: sort(&expr, "MGte", &[("a", &expr), ("b", &expr)]),
-            m_lt: sort(&expr, "MLt", &[("a", &expr), ("b", &expr)]),
-            m_floorto: sort(&expr, "MFloorTo", &[("a", &expr), ("b", &expr)]),
+            m_num: sort(&EXPRESSION, "MNum", &[("n", &I64)]),
+            m_float: sort(&EXPRESSION, "MFloat", &[("n", &F64)]),
+            m_iter: sort(&EXPRESSION, "MIter", &[]),
+            m_var: sort(&EXPRESSION, "MVar", &[("name", &STRING)]),
+            m_add: sort(
+                &EXPRESSION,
+                "MAdd",
+                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
+            ),
+            m_sub: sort(
+                &EXPRESSION,
+                "MSub",
+                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
+            ),
+            m_mul: sort(
+                &EXPRESSION,
+                "MMul",
+                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
+            ),
+            m_ceildiv: sort(
+                &EXPRESSION,
+                "MCeilDiv",
+                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
+            ),
+            m_div: sort(
+                &EXPRESSION,
+                "MDiv",
+                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
+            ),
+            m_mod: sort(
+                &EXPRESSION,
+                "MMod",
+                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
+            ),
+            m_min: sort(
+                &EXPRESSION,
+                "MMin",
+                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
+            ),
+            m_max: sort(
+                &EXPRESSION,
+                "MMax",
+                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
+            ),
+            m_and: sort(
+                &EXPRESSION,
+                "MAnd",
+                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
+            ),
+            m_or: sort(
+                &EXPRESSION,
+                "MOr",
+                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
+            ),
+            m_gte: sort(
+                &EXPRESSION,
+                "MGte",
+                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
+            ),
+            m_lt: sort(
+                &EXPRESSION,
+                "MLt",
+                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
+            ),
+            m_floorto: sort(
+                &EXPRESSION,
+                "MFloorTo",
+                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
+            ),
             m_replace: sort(
-                &expr,
+                &EXPRESSION,
                 "MReplace",
-                &[("x", &expr), ("from", &expr), ("to", &expr)],
+                &[
+                    ("x", &EXPRESSION),
+                    ("from", &EXPRESSION),
+                    ("to", &EXPRESSION),
+                ],
             ),
 
-            e_cons: sort(&elist, "ECons", &[("head", &expr), ("tail", &elist)]),
-            e_nil: sort(&elist, "ENil", &[]),
+            e_cons: sort(&ELIST, "ECons", &[("head", &EXPRESSION), ("tail", &ELIST)]),
+            e_nil: sort(&ELIST, "ENil", &[]),
             m_replace_list: sort(
-                &elist,
+                &ELIST,
                 "MReplaceList",
-                &[("list", &elist), ("from", &expr), ("to", &expr)],
+                &[("list", &ELIST), ("from", &EXPRESSION), ("to", &EXPRESSION)],
             ),
             replace_nth_from_end: sort(
-                &elist,
+                &ELIST,
                 "ReplaceNthFromEnd",
-                &[("list", &elist), ("to", &expr), ("ind", &int_s)],
+                &[("list", &ELIST), ("to", &EXPRESSION), ("ind", &I64)],
             ),
             remove_nth_from_end: sort(
-                &elist,
+                &ELIST,
                 "RemoveNthFromEnd",
-                &[("list", &elist), ("ind", &int_s)],
+                &[("list", &ELIST), ("ind", &I64)],
             ),
-            row_major: sort(&elist, "RowMajor", &[("list", &elist)]),
+            row_major: sort(&ELIST, "RowMajor", &[("list", &ELIST)]),
 
-            f32_dt: sort(&dtype, "F32", &[]),
-            f16_dt: sort(&dtype, "F16", &[]),
-            bf16_dt: sort(&dtype, "Bf16", &[]),
-            int_dt: sort(&dtype, "Int", &[]),
-            bool_dt: sort(&dtype, "Bool", &[]),
+            f32_dt: sort(&DTYPE, "F32", &[]),
+            f16_dt: sort(&DTYPE, "F16", &[]),
+            bf16_dt: sort(&DTYPE, "Bf16", &[]),
+            int_dt: sort(&DTYPE, "Int", &[]),
+            bool_dt: sort(&DTYPE, "Bool", &[]),
 
-            expr,
-            elist,
-            dtype,
+            p_add: func("+", &["a", "b"]),
+            p_sub: func("-", &["a", "b"]),
+            p_mul: func("*", &["a", "b"]),
+            p_div: func("/", &["a", "b"]),
+            p_mod: func("%", &["a", "b"]),
+            p_max: func("max", &["a", "b"]),
+            p_min: func("min", &["a", "b"]),
+            p_and: func("&", &["a", "b"]),
+            p_lt: func("<", &["a", "b"]),
+            p_gte: func(">=", &["a", "b"]),
+
+            f_len: func("len", &["list"]),
+            f_nth: func("nth_from_end", &["list", "index"]),
+            f_nelem: func("n_elements", &["list"]),
         }
     }
 
     /// Register all sort classes and variants into a Program.
     pub fn register(&self, p: &mut Program) {
-        p.add_class(&self.expr);
-        p.add_class(&self.elist);
-        p.add_class(&self.dtype);
+        p.add_class(&EXPRESSION);
+        p.add_class(&ELIST);
+        p.add_class(&DTYPE);
 
         for s in [
             &self.m_num,
@@ -333,42 +416,29 @@ impl BaseSorts {
     }
 }
 
-/// All sort classes needed by `EgglogOp` implementations.
+/// Convenience accessors for common op sort patterns.
 pub struct OpSorts {
-    pub ir: SortClass,
-    pub ilist: SortClass,
-    pub expr: SortClass,
-    pub elist: SortClass,
-    pub dtype: SortClass,
-    pub i64: SortClass,
-    pub f64: SortClass,
-    pub str: SortClass,
+    /// The `(function dtype (IR) DType)` function.
+    pub f_dtype: SortDef,
 }
 
 impl OpSorts {
     pub fn new() -> Self {
         Self {
-            ir: SortClass::new("IR"),
-            ilist: SortClass::new("IList"),
-            expr: SortClass::new("Expression"),
-            elist: SortClass::new("EList"),
-            dtype: SortClass::new("DType"),
-            i64: BuiltinSort::I64.sort_class(),
-            f64: BuiltinSort::F64.sort_class(),
-            str: BuiltinSort::String.sort_class(),
+            f_dtype: func("dtype", &["inp"]),
         }
     }
 
     /// Unary op: (shape: EList, inp: IR, strides: EList, out_strides: EList)
     pub fn unary(&self, name: &str) -> SortDef {
         sort(
-            &self.ir,
+            &IR,
             name,
             &[
-                ("shape", &self.elist),
-                ("inp", &self.ir),
-                ("strides", &self.elist),
-                ("out_strides", &self.elist),
+                ("shape", &ELIST),
+                ("inp", &IR),
+                ("strides", &ELIST),
+                ("out_strides", &ELIST),
             ],
         )
     }
@@ -376,15 +446,15 @@ impl OpSorts {
     /// Binary op: (shape: EList, inp_a: IR, a_strides: EList, inp_b: IR, b_strides: EList, out_strides: EList)
     pub fn binary(&self, name: &str) -> SortDef {
         sort(
-            &self.ir,
+            &IR,
             name,
             &[
-                ("shape", &self.elist),
-                ("inp_a", &self.ir),
-                ("a_strides", &self.elist),
-                ("inp_b", &self.ir),
-                ("b_strides", &self.elist),
-                ("out_strides", &self.elist),
+                ("shape", &ELIST),
+                ("inp_a", &IR),
+                ("a_strides", &ELIST),
+                ("inp_b", &IR),
+                ("b_strides", &ELIST),
+                ("out_strides", &ELIST),
             ],
         )
     }
@@ -392,25 +462,21 @@ impl OpSorts {
     /// Reduce op: (shape: EList, iters: Expression, inp: IR, strides: EList, iter_stride: Expression, out_strides: EList)
     pub fn reduce(&self, name: &str) -> SortDef {
         sort(
-            &self.ir,
+            &IR,
             name,
             &[
-                ("shape", &self.elist),
-                ("iters", &self.expr),
-                ("inp", &self.ir),
-                ("strides", &self.elist),
-                ("iter_stride", &self.expr),
-                ("out_strides", &self.elist),
+                ("shape", &ELIST),
+                ("iters", &EXPRESSION),
+                ("inp", &IR),
+                ("strides", &ELIST),
+                ("iter_stride", &EXPRESSION),
+                ("out_strides", &ELIST),
             ],
         )
     }
 }
 
-static OP_SORTS: LazyLock<OpSorts> = LazyLock::new(OpSorts::new);
-
-pub fn op_sorts() -> &'static OpSorts {
-    &OP_SORTS
-}
+pub static OP_SORTS: LazyLock<OpSorts> = LazyLock::new(OpSorts::new);
 
 /// Generate the egglog program equivalent to `base.egg`.
 ///

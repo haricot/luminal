@@ -6,7 +6,7 @@ use cudarc::driver::{CudaStream, DevicePtr};
 use luminal::{
     egglog_utils::{
         api::{SortDef, sort},
-        base::op_sorts,
+        base::{EXPRESSION, IR, STRING},
         extract_expr,
     },
     op::{EgglogOp, LLIROp},
@@ -66,21 +66,20 @@ impl Default for CuBlasSgemmV2 {
 
 impl EgglogOp for CuBlasSgemmV2 {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
         sort(
-            &s.ir,
+            &IR,
             "cublasSgemmV2",
             &[
-                ("a", &s.ir),
-                ("b", &s.ir),
-                ("m", &s.expr),
-                ("n", &s.expr),
-                ("k", &s.expr),
-                ("a_layout", &s.str),
-                ("b_layout", &s.str),
-                ("lda", &s.expr),
-                ("ldb", &s.expr),
-                ("ldc", &s.expr),
+                ("a", &IR),
+                ("b", &IR),
+                ("m", &EXPRESSION),
+                ("n", &EXPRESSION),
+                ("k", &EXPRESSION),
+                ("a_layout", &STRING),
+                ("b_layout", &STRING),
+                ("lda", &EXPRESSION),
+                ("ldb", &EXPRESSION),
+                ("ldc", &EXPRESSION),
             ],
         )
     }

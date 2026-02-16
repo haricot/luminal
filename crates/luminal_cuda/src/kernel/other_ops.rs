@@ -7,7 +7,7 @@ use cudarc::{
 };
 use itertools::Itertools;
 use luminal::{
-    egglog_utils::{api::{sort, SortDef}, base::op_sorts, extract_dtype, extract_expr, extract_expr_list},
+    egglog_utils::{api::{sort, SortDef}, base::{DTYPE, ELIST, EXPRESSION, IR}, extract_dtype, extract_expr, extract_expr_list},
     op::*,
     prelude::*,
 };
@@ -26,11 +26,10 @@ pub struct KernelMeanReduce {
 }
 impl EgglogOp for KernelMeanReduce {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
-        sort(&s.ir, "KernelMean", &[
-            ("shape", &s.elist), ("iters", &s.expr), ("inp", &s.ir),
-            ("strides", &s.elist), ("iter_stride", &s.expr), ("out_strides", &s.elist),
-            ("dtype", &s.dtype),
+        sort(&IR, "KernelMean", &[
+            ("shape", &ELIST), ("iters", &EXPRESSION), ("inp", &IR),
+            ("strides", &ELIST), ("iter_stride", &EXPRESSION), ("out_strides", &ELIST),
+            ("dtype", &DTYPE),
         ])
     }
 

@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 
 use luminal::{
-    egglog_utils::{api::SortDef, base::op_sorts},
+    egglog_utils::{api::SortDef, base::OP_SORTS},
     op::EgglogOp,
 };
 
@@ -11,7 +11,7 @@ pub type Ops = (Exp, Sigmoid);
 pub struct Exp;
 impl EgglogOp for Exp {
     fn sort(&self) -> SortDef {
-        op_sorts().unary("Exp")
+        OP_SORTS.unary("Exp")
     }
 
     fn cleanup(&self) -> bool {
@@ -42,7 +42,7 @@ impl EgglogOp for Exp {
 pub struct Sigmoid;
 impl EgglogOp for Sigmoid {
     fn sort(&self) -> SortDef {
-        op_sorts().unary("Sigmoid")
+        OP_SORTS.unary("Sigmoid")
     }
 
     fn cleanup(&self) -> bool {

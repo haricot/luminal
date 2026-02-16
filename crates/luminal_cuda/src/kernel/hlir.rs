@@ -9,7 +9,7 @@ use itertools::Itertools;
 use luminal::{
     egglog_utils::{
         api::{SortDef, sort},
-        base::op_sorts,
+        base::{DTYPE, ELIST, EXPRESSION, F64, IR},
         extract_dtype, extract_expr, extract_expr_list,
     },
     op::*,
@@ -46,18 +46,17 @@ pub struct KernelMaxReduce {
 }
 impl EgglogOp for KernelMaxReduce {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
         sort(
-            &s.ir,
+            &IR,
             "KernelMax",
             &[
-                ("shape", &s.elist),
-                ("iters", &s.expr),
-                ("inp", &s.ir),
-                ("strides", &s.elist),
-                ("iter_stride", &s.expr),
-                ("out_strides", &s.elist),
-                ("dtype", &s.dtype),
+                ("shape", &ELIST),
+                ("iters", &EXPRESSION),
+                ("inp", &IR),
+                ("strides", &ELIST),
+                ("iter_stride", &EXPRESSION),
+                ("out_strides", &ELIST),
+                ("dtype", &DTYPE),
             ],
         )
     }
@@ -248,18 +247,17 @@ pub struct KernelSumReduce {
 }
 impl EgglogOp for KernelSumReduce {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
         sort(
-            &s.ir,
+            &IR,
             "KernelSum",
             &[
-                ("shape", &s.elist),
-                ("iters", &s.expr),
-                ("inp", &s.ir),
-                ("strides", &s.elist),
-                ("iter_stride", &s.expr),
-                ("out_strides", &s.elist),
-                ("dtype", &s.dtype),
+                ("shape", &ELIST),
+                ("iters", &EXPRESSION),
+                ("inp", &IR),
+                ("strides", &ELIST),
+                ("iter_stride", &EXPRESSION),
+                ("out_strides", &ELIST),
+                ("dtype", &DTYPE),
             ],
         )
     }
@@ -419,19 +417,18 @@ pub struct KernelAdd {
 
 impl EgglogOp for KernelAdd {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
         sort(
-            &s.ir,
+            &IR,
             "KernelAdd",
             &[
-                ("shape", &s.elist),
-                ("inp_a", &s.ir),
-                ("a_strides", &s.elist),
-                ("inp_b", &s.ir),
-                ("b_strides", &s.elist),
-                ("out_strides", &s.elist),
-                ("dtype", &s.dtype),
-                ("b_dtype", &s.dtype),
+                ("shape", &ELIST),
+                ("inp_a", &IR),
+                ("a_strides", &ELIST),
+                ("inp_b", &IR),
+                ("b_strides", &ELIST),
+                ("out_strides", &ELIST),
+                ("dtype", &DTYPE),
+                ("b_dtype", &DTYPE),
             ],
         )
     }
@@ -576,19 +573,18 @@ pub struct KernelMul {
 
 impl EgglogOp for KernelMul {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
         sort(
-            &s.ir,
+            &IR,
             "KernelMul",
             &[
-                ("shape", &s.elist),
-                ("inp_a", &s.ir),
-                ("a_strides", &s.elist),
-                ("inp_b", &s.ir),
-                ("b_strides", &s.elist),
-                ("out_strides", &s.elist),
-                ("dtype", &s.dtype),
-                ("b_dtype", &s.dtype),
+                ("shape", &ELIST),
+                ("inp_a", &IR),
+                ("a_strides", &ELIST),
+                ("inp_b", &IR),
+                ("b_strides", &ELIST),
+                ("out_strides", &ELIST),
+                ("dtype", &DTYPE),
+                ("b_dtype", &DTYPE),
             ],
         )
     }
@@ -731,19 +727,18 @@ pub struct KernelGather {
 
 impl EgglogOp for KernelGather {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
         sort(
-            &s.ir,
+            &IR,
             "KernelGather",
             &[
-                ("out_shape", &s.elist),
-                ("indexes", &s.ir),
-                ("index_strides", &s.elist),
-                ("data", &s.ir),
-                ("data_shape", &s.elist),
-                ("data_strides", &s.elist),
-                ("out_strides", &s.elist),
-                ("dtype", &s.dtype),
+                ("out_shape", &ELIST),
+                ("indexes", &IR),
+                ("index_strides", &ELIST),
+                ("data", &IR),
+                ("data_shape", &ELIST),
+                ("data_strides", &ELIST),
+                ("out_strides", &ELIST),
+                ("dtype", &DTYPE),
             ],
         )
     }
@@ -885,11 +880,10 @@ pub struct KernelIota {
 
 impl EgglogOp for KernelIota {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
         sort(
-            &s.ir,
+            &IR,
             "KernelIota",
-            &[("expr", &s.expr), ("range", &s.expr)],
+            &[("expr", &EXPRESSION), ("range", &EXPRESSION)],
         )
     }
 
@@ -1019,16 +1013,15 @@ pub struct KernelExp2 {
 
 impl EgglogOp for KernelExp2 {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
         sort(
-            &s.ir,
+            &IR,
             "KernelExp2",
             &[
-                ("shape", &s.elist),
-                ("inp", &s.ir),
-                ("strides", &s.elist),
-                ("out_strides", &s.elist),
-                ("dtype", &s.dtype),
+                ("shape", &ELIST),
+                ("inp", &IR),
+                ("strides", &ELIST),
+                ("out_strides", &ELIST),
+                ("dtype", &DTYPE),
             ],
         )
     }
@@ -1166,16 +1159,15 @@ pub struct KernelLog2 {
 
 impl EgglogOp for KernelLog2 {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
         sort(
-            &s.ir,
+            &IR,
             "KernelLog2",
             &[
-                ("shape", &s.elist),
-                ("inp", &s.ir),
-                ("strides", &s.elist),
-                ("out_strides", &s.elist),
-                ("dtype", &s.dtype),
+                ("shape", &ELIST),
+                ("inp", &IR),
+                ("strides", &ELIST),
+                ("out_strides", &ELIST),
+                ("dtype", &DTYPE),
             ],
         )
     }
@@ -1313,16 +1305,15 @@ pub struct KernelSin {
 
 impl EgglogOp for KernelSin {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
         sort(
-            &s.ir,
+            &IR,
             "KernelSin",
             &[
-                ("shape", &s.elist),
-                ("inp", &s.ir),
-                ("strides", &s.elist),
-                ("out_strides", &s.elist),
-                ("dtype", &s.dtype),
+                ("shape", &ELIST),
+                ("inp", &IR),
+                ("strides", &ELIST),
+                ("out_strides", &ELIST),
+                ("dtype", &DTYPE),
             ],
         )
     }
@@ -1460,16 +1451,15 @@ pub struct KernelRecip {
 
 impl EgglogOp for KernelRecip {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
         sort(
-            &s.ir,
+            &IR,
             "KernelRecip",
             &[
-                ("shape", &s.elist),
-                ("inp", &s.ir),
-                ("strides", &s.elist),
-                ("out_strides", &s.elist),
-                ("dtype", &s.dtype),
+                ("shape", &ELIST),
+                ("inp", &IR),
+                ("strides", &ELIST),
+                ("out_strides", &ELIST),
+                ("dtype", &DTYPE),
             ],
         )
     }
@@ -1607,16 +1597,15 @@ pub struct KernelSqrt {
 
 impl EgglogOp for KernelSqrt {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
         sort(
-            &s.ir,
+            &IR,
             "KernelSqrt",
             &[
-                ("shape", &s.elist),
-                ("inp", &s.ir),
-                ("strides", &s.elist),
-                ("out_strides", &s.elist),
-                ("dtype", &s.dtype),
+                ("shape", &ELIST),
+                ("inp", &IR),
+                ("strides", &ELIST),
+                ("out_strides", &ELIST),
+                ("dtype", &DTYPE),
             ],
         )
     }
@@ -1759,18 +1748,17 @@ pub struct KernelMod {
 
 impl EgglogOp for KernelMod {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
         sort(
-            &s.ir,
+            &IR,
             "KernelMod",
             &[
-                ("shape", &s.elist),
-                ("inp_a", &s.ir),
-                ("a_strides", &s.elist),
-                ("inp_b", &s.ir),
-                ("b_strides", &s.elist),
-                ("out_strides", &s.elist),
-                ("dtype", &s.dtype),
+                ("shape", &ELIST),
+                ("inp_a", &IR),
+                ("a_strides", &ELIST),
+                ("inp_b", &IR),
+                ("b_strides", &ELIST),
+                ("out_strides", &ELIST),
+                ("dtype", &DTYPE),
             ],
         )
     }
@@ -1910,19 +1898,18 @@ pub struct KernelLessThan {
 
 impl EgglogOp for KernelLessThan {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
         sort(
-            &s.ir,
+            &IR,
             "KernelLessThan",
             &[
-                ("shape", &s.elist),
-                ("inp_a", &s.ir),
-                ("a_strides", &s.elist),
-                ("inp_b", &s.ir),
-                ("b_strides", &s.elist),
-                ("out_strides", &s.elist),
-                ("dtype", &s.dtype),
-                ("b_dtype", &s.dtype),
+                ("shape", &ELIST),
+                ("inp_a", &IR),
+                ("a_strides", &ELIST),
+                ("inp_b", &IR),
+                ("b_strides", &ELIST),
+                ("out_strides", &ELIST),
+                ("dtype", &DTYPE),
+                ("b_dtype", &DTYPE),
             ],
         )
     }
@@ -2064,8 +2051,7 @@ pub struct KernelConstant {
 
 impl EgglogOp for KernelConstant {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
-        sort(&s.ir, "KernelConstant", &[("value", &s.f64)])
+        sort(&IR, "KernelConstant", &[("value", &F64)])
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -2183,15 +2169,14 @@ pub struct KernelCast {
 
 impl EgglogOp for KernelCast {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
         sort(
-            &s.ir,
+            &IR,
             "KernelCast",
             &[
-                ("inp", &s.ir),
-                ("size", &s.expr),
-                ("dtype", &s.dtype),
-                ("src_dtype", &s.dtype),
+                ("inp", &IR),
+                ("size", &EXPRESSION),
+                ("dtype", &DTYPE),
+                ("src_dtype", &DTYPE),
             ],
         )
     }

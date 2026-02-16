@@ -2,7 +2,7 @@ use super::{MetalKernelOp, DYN_BUFFER_INDEX};
 use luminal::{
     egglog_utils::{
         api::{sort, SortDef},
-        base::op_sorts,
+        base::{DTYPE, ELIST, EXPRESSION, F64, IR, OP_SORTS},
         SerializedEGraph,
     },
     op::*,
@@ -136,7 +136,7 @@ macro_rules! metal_unary_op {
 
         impl EgglogOp for $name {
             fn sort(&self) -> SortDef {
-                op_sorts().unary($op_name)
+                OP_SORTS.unary($op_name)
             }
 
             fn rewrites(&self) -> Vec<String> {
@@ -280,7 +280,7 @@ pub struct MetalAdd {
 
 impl EgglogOp for MetalAdd {
     fn sort(&self) -> SortDef {
-        op_sorts().binary("MetalAdd")
+        OP_SORTS.binary("MetalAdd")
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -412,7 +412,7 @@ pub struct MetalMul {
 
 impl EgglogOp for MetalMul {
     fn sort(&self) -> SortDef {
-        op_sorts().binary("MetalMul")
+        OP_SORTS.binary("MetalMul")
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -533,7 +533,7 @@ pub struct MetalMod {
 
 impl EgglogOp for MetalMod {
     fn sort(&self) -> SortDef {
-        op_sorts().binary("MetalMod")
+        OP_SORTS.binary("MetalMod")
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -654,7 +654,7 @@ pub struct MetalLessThan {
 
 impl EgglogOp for MetalLessThan {
     fn sort(&self) -> SortDef {
-        op_sorts().binary("MetalLessThan")
+        OP_SORTS.binary("MetalLessThan")
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -779,7 +779,7 @@ pub struct MetalSumReduce {
 
 impl EgglogOp for MetalSumReduce {
     fn sort(&self) -> SortDef {
-        op_sorts().reduce("MetalSum")
+        OP_SORTS.reduce("MetalSum")
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -935,7 +935,7 @@ pub struct MetalMaxReduce {
 
 impl EgglogOp for MetalMaxReduce {
     fn sort(&self) -> SortDef {
-        op_sorts().reduce("MetalMax")
+        OP_SORTS.reduce("MetalMax")
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -1092,8 +1092,7 @@ pub struct MetalConstant {
 
 impl EgglogOp for MetalConstant {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
-        sort(&s.ir, "MetalConstant", &[("value", &s.f64)])
+        sort(&IR, "MetalConstant", &[("value", &F64)])
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -1191,8 +1190,11 @@ pub struct MetalIota {
 
 impl EgglogOp for MetalIota {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
-        sort(&s.ir, "MetalIota", &[("expr", &s.expr), ("range", &s.expr)])
+        sort(
+            &IR,
+            "MetalIota",
+            &[("expr", &EXPRESSION), ("range", &EXPRESSION)],
+        )
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -1294,17 +1296,16 @@ pub struct MetalGather {
 
 impl EgglogOp for MetalGather {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
         sort(
-            &s.ir,
+            &IR,
             "MetalGather",
             &[
-                ("out_shape", &s.elist),
-                ("indexes", &s.ir),
-                ("index_strides", &s.elist),
-                ("data", &s.ir),
-                ("data_strides", &s.elist),
-                ("out_strides", &s.elist),
+                ("out_shape", &ELIST),
+                ("indexes", &IR),
+                ("index_strides", &ELIST),
+                ("data", &IR),
+                ("data_strides", &ELIST),
+                ("out_strides", &ELIST),
             ],
         )
     }
@@ -1453,11 +1454,10 @@ pub struct MetalCast {
 
 impl EgglogOp for MetalCast {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
         sort(
-            &s.ir,
+            &IR,
             "MetalCast",
-            &[("inp", &s.ir), ("size", &s.expr), ("dtype", &s.dtype)],
+            &[("inp", &IR), ("size", &EXPRESSION), ("dtype", &DTYPE)],
         )
     }
 

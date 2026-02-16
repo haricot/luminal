@@ -2,7 +2,7 @@ use std::{fmt::Debug, sync::Arc};
 
 use cudarc::driver::CudaStream;
 use luminal::{
-    egglog_utils::{api::{sort, SortDef}, base::op_sorts, extract_expr, extract_expr_list},
+    egglog_utils::{api::{sort, SortDef}, base::{ELIST, EXPRESSION, IR}, extract_expr, extract_expr_list},
     op::*,
     prelude::*,
 };
@@ -30,11 +30,10 @@ pub struct RowAdd {
 
 impl EgglogOp for RowAdd {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
-        sort(&s.ir, "RowAdd", &[
-            ("shape", &s.elist), ("a", &s.ir), ("a_strides", &s.elist),
-            ("b", &s.ir), ("b_strides", &s.elist), ("out_strides", &s.elist),
-            ("row_width", &s.expr),
+        sort(&IR, "RowAdd", &[
+            ("shape", &ELIST), ("a", &IR), ("a_strides", &ELIST),
+            ("b", &IR), ("b_strides", &ELIST), ("out_strides", &ELIST),
+            ("row_width", &EXPRESSION),
         ])
     }
 
@@ -172,11 +171,10 @@ pub struct RowSwishMul {
 
 impl EgglogOp for RowSwishMul {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
-        sort(&s.ir, "RowSwishMul", &[
-            ("shape", &s.elist), ("a", &s.ir), ("a_strides", &s.elist),
-            ("b", &s.ir), ("b_strides", &s.elist), ("row_width", &s.expr),
-            ("sm_count", &s.expr),
+        sort(&IR, "RowSwishMul", &[
+            ("shape", &ELIST), ("a", &IR), ("a_strides", &ELIST),
+            ("b", &IR), ("b_strides", &ELIST), ("row_width", &EXPRESSION),
+            ("sm_count", &EXPRESSION),
         ])
     }
 
@@ -350,10 +348,9 @@ pub struct RowRMSNorm {
 
 impl EgglogOp for RowRMSNorm {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
-        sort(&s.ir, "RowRMSNorm", &[
-            ("shape", &s.elist), ("inp", &s.ir), ("strides", &s.elist),
-            ("row_width", &s.expr), ("weight", &s.ir),
+        sort(&IR, "RowRMSNorm", &[
+            ("shape", &ELIST), ("inp", &IR), ("strides", &ELIST),
+            ("row_width", &EXPRESSION), ("weight", &IR),
         ])
     }
 
@@ -577,10 +574,9 @@ pub struct RowRope {
 
 impl EgglogOp for RowRope {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
-        sort(&s.ir, "RowRope", &[
-            ("shape", &s.elist), ("inp", &s.ir), ("strides", &s.elist),
-            ("row_width", &s.expr), ("pos_ids", &s.ir),
+        sort(&IR, "RowRope", &[
+            ("shape", &ELIST), ("inp", &IR), ("strides", &ELIST),
+            ("row_width", &EXPRESSION), ("pos_ids", &IR),
         ])
     }
 
@@ -978,13 +974,12 @@ pub struct TileMatmulSplitK {
 
 impl EgglogOp for TileMatmulSplitK {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
-        sort(&s.ir, "TileMatmulSplitK", &[
-            ("tiled_shape", &s.elist), ("out_shape", &s.elist), ("k", &s.expr),
-            ("a", &s.ir), ("a_stride", &s.elist), ("a_m_stride", &s.expr), ("a_k_stride", &s.expr),
-            ("b", &s.ir), ("b_stride", &s.elist), ("b_k_stride", &s.expr), ("b_n_stride", &s.expr),
-            ("out_stride", &s.elist), ("out_m_stride", &s.expr), ("out_n_stride", &s.expr),
-            ("k_chunk", &s.expr),
+        sort(&IR, "TileMatmulSplitK", &[
+            ("tiled_shape", &ELIST), ("out_shape", &ELIST), ("k", &EXPRESSION),
+            ("a", &IR), ("a_stride", &ELIST), ("a_m_stride", &EXPRESSION), ("a_k_stride", &EXPRESSION),
+            ("b", &IR), ("b_stride", &ELIST), ("b_k_stride", &EXPRESSION), ("b_n_stride", &EXPRESSION),
+            ("out_stride", &ELIST), ("out_m_stride", &EXPRESSION), ("out_n_stride", &EXPRESSION),
+            ("k_chunk", &EXPRESSION),
         ])
     }
 
@@ -1359,13 +1354,12 @@ pub struct TileMatmulFullSplit {
 
 impl EgglogOp for TileMatmulFullSplit {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
-        sort(&s.ir, "TileMatmulFullSplit", &[
-            ("sm_count", &s.expr), ("untiled_range", &s.elist),
-            ("m_tiles", &s.expr), ("n_tiles", &s.expr), ("total_k", &s.expr),
-            ("a", &s.ir), ("a_stride", &s.elist), ("a_m_stride", &s.expr), ("a_k_stride", &s.expr),
-            ("b", &s.ir), ("b_stride", &s.elist), ("b_n_stride", &s.expr), ("b_k_stride", &s.expr),
-            ("out_stride", &s.elist), ("out_m_stride", &s.expr), ("out_n_stride", &s.expr),
+        sort(&IR, "TileMatmulFullSplit", &[
+            ("sm_count", &EXPRESSION), ("untiled_range", &ELIST),
+            ("m_tiles", &EXPRESSION), ("n_tiles", &EXPRESSION), ("total_k", &EXPRESSION),
+            ("a", &IR), ("a_stride", &ELIST), ("a_m_stride", &EXPRESSION), ("a_k_stride", &EXPRESSION),
+            ("b", &IR), ("b_stride", &ELIST), ("b_n_stride", &EXPRESSION), ("b_k_stride", &EXPRESSION),
+            ("out_stride", &ELIST), ("out_m_stride", &EXPRESSION), ("out_n_stride", &EXPRESSION),
         ])
     }
 
@@ -1761,10 +1755,9 @@ pub struct RowEmbed {
 
 impl EgglogOp for RowEmbed {
     fn sort(&self) -> SortDef {
-        let s = op_sorts();
-        sort(&s.ir, "RowEmbed", &[
-            ("shape", &s.elist), ("token_ids", &s.ir), ("token_strides", &s.elist),
-            ("embed_table", &s.ir), ("out_strides", &s.elist), ("embed_dim", &s.expr),
+        sort(&IR, "RowEmbed", &[
+            ("shape", &ELIST), ("token_ids", &IR), ("token_strides", &ELIST),
+            ("embed_table", &IR), ("out_strides", &ELIST), ("embed_dim", &EXPRESSION),
         ])
     }
 
