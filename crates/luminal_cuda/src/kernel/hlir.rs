@@ -410,7 +410,6 @@ pub struct KernelAdd {
     b_stride: Vec<Expression>,
     out_stride: Vec<Expression>,
     dtype: DType,
-    b_dtype: DType,
 }
 
 impl EgglogOp for KernelAdd {
@@ -426,29 +425,12 @@ impl EgglogOp for KernelAdd {
                 ("b_strides", ELIST),
                 ("out_strides", ELIST),
                 ("dtype", DTYPE),
-                ("b_dtype", DTYPE),
             ],
         )
     }
 
     fn rewrites(&self) -> Vec<String> {
-        let hlir = Add::default().sort();
-        let hlir_vars: Vec<Term> = hlir
-            .fields
-            .iter()
-            .map(|f| v(&format!("?{}", f.name)))
-            .collect();
-        let mut args = hlir_vars.clone();
-        args.push(v("?dtype_a"));
-        args.push(v("?dtype_b"));
-        vec![
-            rule()
-                .fact(eq(v("?a"), app(&hlir, hlir_vars)))
-                .fact(eq(v("?dtype_a"), dtype_term(v("?inp_a"))))
-                .fact(eq(v("?dtype_b"), dtype_term(v("?inp_b"))))
-                .union(v("?a"), app(&self.sort(), args))
-                .to_egglog_string(),
-        ]
+        vec![kernel_rewrite::<Add, Self>()]
     }
 
     fn cleanup(&self) -> bool {
@@ -469,7 +451,6 @@ impl EgglogOp for KernelAdd {
                 b_stride: extract_expr_list(egraph, children[4], list_cache, expr_cache).unwrap(),
                 out_stride: extract_expr_list(egraph, children[5], list_cache, expr_cache).unwrap(),
                 dtype: extract_dtype(egraph, children[6]),
-                b_dtype: extract_dtype(egraph, children[7]),
             })),
             vec![children[1], children[3]],
         )
@@ -499,7 +480,6 @@ impl KernelOp for KernelAdd {
             .chain(self.out_stride.iter().flat_map(|e| e.dyn_vars()))
             .collect::<FxHashSet<_>>();
         let dtype = cuda_dtype(self.dtype);
-        let b_dtype = cuda_dtype(self.b_dtype);
         let (dyn_defines, _sorted_dims) = generate_dyn_dims_defines(&vars);
         // Add dyn_dims parameter if we have dynamic dimensions
         let dyn_dims_param = if vars.is_empty() {
@@ -511,9 +491,9 @@ impl KernelOp for KernelAdd {
             "
 {dyn_defines}
 extern \"C\" {{
-    __global__ void add_k({dtype} *C, const {dtype} *A, const {b_dtype} *B{dyn_dims_param}) {{
+    __global__ void add_k({dtype} *C, const {dtype} *A, const {dtype} *B{dyn_dims_param}) {{
         long long const_z = (long long)blockIdx.x * blockDim.x + threadIdx.x;
-        C[{}] = A[{}] + ({dtype})B[{}];
+        C[{}] = A[{}] + B[{}];
     }}
 }}",
             flatten_mul_strides(&self.out_shape, &self.out_stride).to_kernel(),
@@ -570,7 +550,6 @@ pub struct KernelMul {
     b_stride: Vec<Expression>,
     out_stride: Vec<Expression>,
     dtype: DType,
-    b_dtype: DType,
 }
 
 impl EgglogOp for KernelMul {
@@ -586,29 +565,12 @@ impl EgglogOp for KernelMul {
                 ("b_strides", ELIST),
                 ("out_strides", ELIST),
                 ("dtype", DTYPE),
-                ("b_dtype", DTYPE),
             ],
         )
     }
 
     fn rewrites(&self) -> Vec<String> {
-        let hlir = Mul::default().sort();
-        let hlir_vars: Vec<Term> = hlir
-            .fields
-            .iter()
-            .map(|f| v(&format!("?{}", f.name)))
-            .collect();
-        let mut args = hlir_vars.clone();
-        args.push(v("?dtype_a"));
-        args.push(v("?dtype_b"));
-        vec![
-            rule()
-                .fact(eq(v("?a"), app(&hlir, hlir_vars)))
-                .fact(eq(v("?dtype_a"), dtype_term(v("?inp_a"))))
-                .fact(eq(v("?dtype_b"), dtype_term(v("?inp_b"))))
-                .union(v("?a"), app(&self.sort(), args))
-                .to_egglog_string(),
-        ]
+        vec![kernel_rewrite::<Mul, Self>()]
     }
 
     fn cleanup(&self) -> bool {
@@ -629,7 +591,6 @@ impl EgglogOp for KernelMul {
                 b_stride: extract_expr_list(egraph, children[4], list_cache, expr_cache).unwrap(),
                 out_stride: extract_expr_list(egraph, children[5], list_cache, expr_cache).unwrap(),
                 dtype: extract_dtype(egraph, children[6]),
-                b_dtype: extract_dtype(egraph, children[7]),
             })),
             vec![children[1], children[3]],
         )
@@ -659,7 +620,6 @@ impl KernelOp for KernelMul {
             .chain(self.out_stride.iter().flat_map(|e| e.dyn_vars()))
             .collect::<FxHashSet<_>>();
         let dtype = cuda_dtype(self.dtype);
-        let b_dtype = cuda_dtype(self.b_dtype);
         let (dyn_defines, _sorted_dims) = generate_dyn_dims_defines(&vars);
         let dyn_dims_param = if vars.is_empty() {
             ""
@@ -670,9 +630,9 @@ impl KernelOp for KernelMul {
             "
 {dyn_defines}
 extern \"C\" {{
-    __global__ void mul_k({dtype} *C, const {dtype} *A, const {b_dtype} *B{dyn_dims_param}) {{
+    __global__ void mul_k({dtype} *C, const {dtype} *A, const {dtype} *B{dyn_dims_param}) {{
         long long const_z = (long long)blockIdx.x * blockDim.x + threadIdx.x;
-        C[{}] = A[{}] * ({dtype})B[{}];
+        C[{}] = A[{}] * B[{}];
     }}
 }}",
             flatten_mul_strides(&self.out_shape, &self.out_stride).to_kernel(),
@@ -1853,7 +1813,6 @@ pub struct KernelLessThan {
     b_stride: Vec<Expression>,
     out_stride: Vec<Expression>,
     dtype: DType,
-    b_dtype: DType,
 }
 
 impl EgglogOp for KernelLessThan {
@@ -1869,29 +1828,12 @@ impl EgglogOp for KernelLessThan {
                 ("b_strides", ELIST),
                 ("out_strides", ELIST),
                 ("dtype", DTYPE),
-                ("b_dtype", DTYPE),
             ],
         )
     }
 
     fn rewrites(&self) -> Vec<String> {
-        let hlir = LessThan::default().sort();
-        let hlir_vars: Vec<Term> = hlir
-            .fields
-            .iter()
-            .map(|f| v(&format!("?{}", f.name)))
-            .collect();
-        let mut args = hlir_vars.clone();
-        args.push(v("?dtype_a"));
-        args.push(v("?dtype_b"));
-        vec![
-            rule()
-                .fact(eq(v("?a"), app(&hlir, hlir_vars)))
-                .fact(eq(v("?dtype_a"), dtype_term(v("?inp_a"))))
-                .fact(eq(v("?dtype_b"), dtype_term(v("?inp_b"))))
-                .union(v("?a"), app(&self.sort(), args))
-                .to_egglog_string(),
-        ]
+        vec![kernel_rewrite::<LessThan, Self>()]
     }
 
     fn cleanup(&self) -> bool {
@@ -1912,7 +1854,6 @@ impl EgglogOp for KernelLessThan {
                 b_stride: extract_expr_list(egraph, children[4], list_cache, expr_cache).unwrap(),
                 out_stride: extract_expr_list(egraph, children[5], list_cache, expr_cache).unwrap(),
                 dtype: extract_dtype(egraph, children[6]),
-                b_dtype: extract_dtype(egraph, children[7]),
             })),
             vec![children[1], children[3]],
         )
@@ -1942,7 +1883,6 @@ impl KernelOp for KernelLessThan {
             .chain(self.out_stride.iter().flat_map(|e| e.dyn_vars()))
             .collect::<FxHashSet<_>>();
         let dtype = cuda_dtype(self.dtype);
-        let b_dtype = cuda_dtype(self.b_dtype);
         let (dyn_defines, _sorted_dims) = generate_dyn_dims_defines(&vars);
         let dyn_dims_param = if vars.is_empty() {
             ""
@@ -1953,9 +1893,9 @@ impl KernelOp for KernelLessThan {
             "
 {dyn_defines}
 extern \"C\" {{
-    __global__ void less_than_k(unsigned char *C, const {dtype} *A, const {b_dtype} *B{dyn_dims_param}) {{
+    __global__ void less_than_k(unsigned char *C, const {dtype} *A, const {dtype} *B{dyn_dims_param}) {{
         long long const_z = (long long)blockIdx.x * blockDim.x + threadIdx.x;
-        C[{}] = A[{}] < ({dtype})B[{}] ? 1 : 0;
+        C[{}] = A[{}] < B[{}] ? 1 : 0;
     }}
 }}",
             flatten_mul_strides(&self.out_shape, &self.out_stride).to_kernel(),
