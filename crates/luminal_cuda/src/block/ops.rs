@@ -2,7 +2,11 @@ use std::{fmt::Debug, sync::Arc};
 
 use cudarc::driver::CudaStream;
 use luminal::{
-    egglog_utils::{api::{sort, SortDef}, base::{ELIST, EXPRESSION, IR}, extract_expr, extract_expr_list},
+    egglog_utils::{
+        api::{SortDef, sort},
+        base::{ELIST, EXPRESSION, IR},
+        extract_expr, extract_expr_list,
+    },
     op::*,
     prelude::*,
 };
@@ -30,11 +34,19 @@ pub struct RowAdd {
 
 impl EgglogOp for RowAdd {
     fn sort(&self) -> SortDef {
-        sort(&IR, "RowAdd", &[
-            ("shape", &ELIST), ("a", &IR), ("a_strides", &ELIST),
-            ("b", &IR), ("b_strides", &ELIST), ("out_strides", &ELIST),
-            ("row_width", &EXPRESSION),
-        ])
+        sort(
+            IR,
+            "RowAdd",
+            &[
+                ("shape", ELIST),
+                ("a", IR),
+                ("a_strides", ELIST),
+                ("b", IR),
+                ("b_strides", ELIST),
+                ("out_strides", ELIST),
+                ("row_width", EXPRESSION),
+            ],
+        )
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -171,11 +183,19 @@ pub struct RowSwishMul {
 
 impl EgglogOp for RowSwishMul {
     fn sort(&self) -> SortDef {
-        sort(&IR, "RowSwishMul", &[
-            ("shape", &ELIST), ("a", &IR), ("a_strides", &ELIST),
-            ("b", &IR), ("b_strides", &ELIST), ("row_width", &EXPRESSION),
-            ("sm_count", &EXPRESSION),
-        ])
+        sort(
+            IR,
+            "RowSwishMul",
+            &[
+                ("shape", ELIST),
+                ("a", IR),
+                ("a_strides", ELIST),
+                ("b", IR),
+                ("b_strides", ELIST),
+                ("row_width", EXPRESSION),
+                ("sm_count", EXPRESSION),
+            ],
+        )
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -348,10 +368,17 @@ pub struct RowRMSNorm {
 
 impl EgglogOp for RowRMSNorm {
     fn sort(&self) -> SortDef {
-        sort(&IR, "RowRMSNorm", &[
-            ("shape", &ELIST), ("inp", &IR), ("strides", &ELIST),
-            ("row_width", &EXPRESSION), ("weight", &IR),
-        ])
+        sort(
+            IR,
+            "RowRMSNorm",
+            &[
+                ("shape", ELIST),
+                ("inp", IR),
+                ("strides", ELIST),
+                ("row_width", EXPRESSION),
+                ("weight", IR),
+            ],
+        )
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -574,10 +601,17 @@ pub struct RowRope {
 
 impl EgglogOp for RowRope {
     fn sort(&self) -> SortDef {
-        sort(&IR, "RowRope", &[
-            ("shape", &ELIST), ("inp", &IR), ("strides", &ELIST),
-            ("row_width", &EXPRESSION), ("pos_ids", &IR),
-        ])
+        sort(
+            IR,
+            "RowRope",
+            &[
+                ("shape", ELIST),
+                ("inp", IR),
+                ("strides", ELIST),
+                ("row_width", EXPRESSION),
+                ("pos_ids", IR),
+            ],
+        )
     }
 
     fn cleanup(&self) -> bool {
@@ -974,13 +1008,27 @@ pub struct TileMatmulSplitK {
 
 impl EgglogOp for TileMatmulSplitK {
     fn sort(&self) -> SortDef {
-        sort(&IR, "TileMatmulSplitK", &[
-            ("tiled_shape", &ELIST), ("out_shape", &ELIST), ("k", &EXPRESSION),
-            ("a", &IR), ("a_stride", &ELIST), ("a_m_stride", &EXPRESSION), ("a_k_stride", &EXPRESSION),
-            ("b", &IR), ("b_stride", &ELIST), ("b_k_stride", &EXPRESSION), ("b_n_stride", &EXPRESSION),
-            ("out_stride", &ELIST), ("out_m_stride", &EXPRESSION), ("out_n_stride", &EXPRESSION),
-            ("k_chunk", &EXPRESSION),
-        ])
+        sort(
+            IR,
+            "TileMatmulSplitK",
+            &[
+                ("tiled_shape", ELIST),
+                ("out_shape", ELIST),
+                ("k", EXPRESSION),
+                ("a", IR),
+                ("a_stride", ELIST),
+                ("a_m_stride", EXPRESSION),
+                ("a_k_stride", EXPRESSION),
+                ("b", IR),
+                ("b_stride", ELIST),
+                ("b_k_stride", EXPRESSION),
+                ("b_n_stride", EXPRESSION),
+                ("out_stride", ELIST),
+                ("out_m_stride", EXPRESSION),
+                ("out_n_stride", EXPRESSION),
+                ("k_chunk", EXPRESSION),
+            ],
+        )
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -1354,13 +1402,28 @@ pub struct TileMatmulFullSplit {
 
 impl EgglogOp for TileMatmulFullSplit {
     fn sort(&self) -> SortDef {
-        sort(&IR, "TileMatmulFullSplit", &[
-            ("sm_count", &EXPRESSION), ("untiled_range", &ELIST),
-            ("m_tiles", &EXPRESSION), ("n_tiles", &EXPRESSION), ("total_k", &EXPRESSION),
-            ("a", &IR), ("a_stride", &ELIST), ("a_m_stride", &EXPRESSION), ("a_k_stride", &EXPRESSION),
-            ("b", &IR), ("b_stride", &ELIST), ("b_n_stride", &EXPRESSION), ("b_k_stride", &EXPRESSION),
-            ("out_stride", &ELIST), ("out_m_stride", &EXPRESSION), ("out_n_stride", &EXPRESSION),
-        ])
+        sort(
+            IR,
+            "TileMatmulFullSplit",
+            &[
+                ("sm_count", EXPRESSION),
+                ("untiled_range", ELIST),
+                ("m_tiles", EXPRESSION),
+                ("n_tiles", EXPRESSION),
+                ("total_k", EXPRESSION),
+                ("a", IR),
+                ("a_stride", ELIST),
+                ("a_m_stride", EXPRESSION),
+                ("a_k_stride", EXPRESSION),
+                ("b", IR),
+                ("b_stride", ELIST),
+                ("b_n_stride", EXPRESSION),
+                ("b_k_stride", EXPRESSION),
+                ("out_stride", ELIST),
+                ("out_m_stride", EXPRESSION),
+                ("out_n_stride", EXPRESSION),
+            ],
+        )
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -1755,10 +1818,18 @@ pub struct RowEmbed {
 
 impl EgglogOp for RowEmbed {
     fn sort(&self) -> SortDef {
-        sort(&IR, "RowEmbed", &[
-            ("shape", &ELIST), ("token_ids", &IR), ("token_strides", &ELIST),
-            ("embed_table", &IR), ("out_strides", &ELIST), ("embed_dim", &EXPRESSION),
-        ])
+        sort(
+            IR,
+            "RowEmbed",
+            &[
+                ("shape", ELIST),
+                ("token_ids", IR),
+                ("token_strides", ELIST),
+                ("embed_table", IR),
+                ("out_strides", ELIST),
+                ("embed_dim", EXPRESSION),
+            ],
+        )
     }
 
     fn rewrites(&self) -> Vec<String> {

@@ -8,10 +8,11 @@ use cudarc::{
 use itertools::Itertools;
 use luminal::{
     egglog_utils::{
-        api::{SortDef, sort},
-        base::{DTYPE, ELIST, EXPRESSION, F64, IR},
+        api::{SortDef, Term, app, eq, rule, sort, v},
+        base::{DTYPE, ELIST, EXPRESSION, F64, IR, OP_SORTS, SORTS},
         extract_dtype, extract_expr, extract_expr_list,
     },
+    hlir::{Add, Exp2, LessThan, Log2, MaxReduce, Mod, Mul, Recip, Sin, Sqrt, SumReduce},
     op::*,
     prelude::*,
 };
@@ -34,6 +35,29 @@ pub type Ops = (
     KernelCast,
 );
 
+fn dtype_term(e: Term) -> Term {
+    app(&OP_SORTS.f_dtype, vec![e])
+}
+
+/// Build a rewrite that matches an HLIR op, reads dtype(s) from the given source fields,
+/// and unions with a kernel op that has the same fields plus the dtype(s) appended.
+fn kernel_rewrite<H: Default + EgglogOp, L: Default + EgglogOp>() -> String {
+    let hlir = H::default().sort();
+    let llir = L::default().sort();
+    let hlir_vars: Vec<Term> = hlir
+        .fields
+        .iter()
+        .map(|f| v(&format!("?{}", f.name)))
+        .collect();
+    let mut args = hlir_vars.clone();
+    args.push(v("?dtype"));
+    rule()
+        .fact(eq(v("?a"), app(&hlir, hlir_vars)))
+        .fact(eq(v("?dtype"), dtype_term(v("?a"))))
+        .union(v("?a"), app(&llir, args))
+        .to_egglog_string()
+}
+
 #[derive(Default, Debug, Clone)]
 
 pub struct KernelMaxReduce {
@@ -47,35 +71,22 @@ pub struct KernelMaxReduce {
 impl EgglogOp for KernelMaxReduce {
     fn sort(&self) -> SortDef {
         sort(
-            &IR,
+            IR,
             "KernelMax",
             &[
-                ("shape", &ELIST),
-                ("iters", &EXPRESSION),
-                ("inp", &IR),
-                ("strides", &ELIST),
-                ("iter_stride", &EXPRESSION),
-                ("out_strides", &ELIST),
-                ("dtype", &DTYPE),
+                ("shape", ELIST),
+                ("iters", EXPRESSION),
+                ("inp", IR),
+                ("strides", ELIST),
+                ("iter_stride", EXPRESSION),
+                ("out_strides", ELIST),
+                ("dtype", DTYPE),
             ],
         )
     }
 
     fn rewrites(&self) -> Vec<String> {
-        vec![
-            "
-(rule
-    (
-        (= ?a (Max ?out_shape ?iters ?inp ?in_stride ?iter_stride ?out_stride))
-        (= ?dty (dtype ?inp))
-    )
-    (
-        (union ?a (KernelMax ?out_shape ?iters ?inp ?in_stride ?iter_stride ?out_stride ?dty))
-    )
-    :name \"kernel max reduce\"
-)"
-            .to_string(),
-        ]
+        vec![kernel_rewrite::<MaxReduce, Self>()]
     }
 
     fn cleanup(&self) -> bool {
@@ -248,35 +259,22 @@ pub struct KernelSumReduce {
 impl EgglogOp for KernelSumReduce {
     fn sort(&self) -> SortDef {
         sort(
-            &IR,
+            IR,
             "KernelSum",
             &[
-                ("shape", &ELIST),
-                ("iters", &EXPRESSION),
-                ("inp", &IR),
-                ("strides", &ELIST),
-                ("iter_stride", &EXPRESSION),
-                ("out_strides", &ELIST),
-                ("dtype", &DTYPE),
+                ("shape", ELIST),
+                ("iters", EXPRESSION),
+                ("inp", IR),
+                ("strides", ELIST),
+                ("iter_stride", EXPRESSION),
+                ("out_strides", ELIST),
+                ("dtype", DTYPE),
             ],
         )
     }
 
     fn rewrites(&self) -> Vec<String> {
-        vec![
-            "
-(rule
-    (
-        (= ?a (Sum ?out_shape ?iters ?inp ?in_stride ?iter_stride ?out_stride))
-        (= ?dty (dtype ?inp))
-    )
-    (
-        (union ?a (KernelSum ?out_shape ?iters ?inp ?in_stride ?iter_stride ?out_stride ?dty))
-    )
-    :name \"kernel sum reduce\"
-)"
-            .to_string(),
-        ]
+        vec![kernel_rewrite::<SumReduce, Self>()]
     }
 
     fn cleanup(&self) -> bool {
@@ -418,35 +416,39 @@ pub struct KernelAdd {
 impl EgglogOp for KernelAdd {
     fn sort(&self) -> SortDef {
         sort(
-            &IR,
+            IR,
             "KernelAdd",
             &[
-                ("shape", &ELIST),
-                ("inp_a", &IR),
-                ("a_strides", &ELIST),
-                ("inp_b", &IR),
-                ("b_strides", &ELIST),
-                ("out_strides", &ELIST),
-                ("dtype", &DTYPE),
-                ("b_dtype", &DTYPE),
+                ("shape", ELIST),
+                ("inp_a", IR),
+                ("a_strides", ELIST),
+                ("inp_b", IR),
+                ("b_strides", ELIST),
+                ("out_strides", ELIST),
+                ("dtype", DTYPE),
+                ("b_dtype", DTYPE),
             ],
         )
     }
 
     fn rewrites(&self) -> Vec<String> {
-        vec!["
-(rule
-    (
-        (= ?a (Add ?out_shape ?inp_a ?inp_a_strides ?inp_b ?inp_b_strides ?out_strides))
-        (= ?dty (dtype ?inp_a))
-        (= ?b_dty (dtype ?inp_b))
-    )
-    (
-        (union ?a (KernelAdd ?out_shape ?inp_a ?inp_a_strides ?inp_b ?inp_b_strides ?out_strides ?dty ?b_dty))
-    )
-    :name \"kernel add\"
-)"
-        .to_string()]
+        let hlir = Add::default().sort();
+        let hlir_vars: Vec<Term> = hlir
+            .fields
+            .iter()
+            .map(|f| v(&format!("?{}", f.name)))
+            .collect();
+        let mut args = hlir_vars.clone();
+        args.push(v("?dtype_a"));
+        args.push(v("?dtype_b"));
+        vec![
+            rule()
+                .fact(eq(v("?a"), app(&hlir, hlir_vars)))
+                .fact(eq(v("?dtype_a"), dtype_term(v("?inp_a"))))
+                .fact(eq(v("?dtype_b"), dtype_term(v("?inp_b"))))
+                .union(v("?a"), app(&self.sort(), args))
+                .to_egglog_string(),
+        ]
     }
 
     fn cleanup(&self) -> bool {
@@ -574,35 +576,39 @@ pub struct KernelMul {
 impl EgglogOp for KernelMul {
     fn sort(&self) -> SortDef {
         sort(
-            &IR,
+            IR,
             "KernelMul",
             &[
-                ("shape", &ELIST),
-                ("inp_a", &IR),
-                ("a_strides", &ELIST),
-                ("inp_b", &IR),
-                ("b_strides", &ELIST),
-                ("out_strides", &ELIST),
-                ("dtype", &DTYPE),
-                ("b_dtype", &DTYPE),
+                ("shape", ELIST),
+                ("inp_a", IR),
+                ("a_strides", ELIST),
+                ("inp_b", IR),
+                ("b_strides", ELIST),
+                ("out_strides", ELIST),
+                ("dtype", DTYPE),
+                ("b_dtype", DTYPE),
             ],
         )
     }
 
     fn rewrites(&self) -> Vec<String> {
-        vec!["
-(rule
-    (
-        (= ?a (Mul ?out_shape ?inp_a ?inp_a_strides ?inp_b ?inp_b_strides ?out_strides))
-        (= ?dty (dtype ?inp_a))
-        (= ?b_dty (dtype ?inp_b))
-    )
-    (
-        (union ?a (KernelMul ?out_shape ?inp_a ?inp_a_strides ?inp_b ?inp_b_strides ?out_strides ?dty ?b_dty))
-    )
-    :name \"kernel mul\"
-)"
-        .to_string()]
+        let hlir = Mul::default().sort();
+        let hlir_vars: Vec<Term> = hlir
+            .fields
+            .iter()
+            .map(|f| v(&format!("?{}", f.name)))
+            .collect();
+        let mut args = hlir_vars.clone();
+        args.push(v("?dtype_a"));
+        args.push(v("?dtype_b"));
+        vec![
+            rule()
+                .fact(eq(v("?a"), app(&hlir, hlir_vars)))
+                .fact(eq(v("?dtype_a"), dtype_term(v("?inp_a"))))
+                .fact(eq(v("?dtype_b"), dtype_term(v("?inp_b"))))
+                .union(v("?a"), app(&self.sort(), args))
+                .to_egglog_string(),
+        ]
     }
 
     fn cleanup(&self) -> bool {
@@ -728,35 +734,71 @@ pub struct KernelGather {
 impl EgglogOp for KernelGather {
     fn sort(&self) -> SortDef {
         sort(
-            &IR,
+            IR,
             "KernelGather",
             &[
-                ("out_shape", &ELIST),
-                ("indexes", &IR),
-                ("index_strides", &ELIST),
-                ("data", &IR),
-                ("data_shape", &ELIST),
-                ("data_strides", &ELIST),
-                ("out_strides", &ELIST),
-                ("dtype", &DTYPE),
+                ("out_shape", ELIST),
+                ("indexes", IR),
+                ("index_strides", ELIST),
+                ("data", IR),
+                ("data_shape", ELIST),
+                ("data_strides", ELIST),
+                ("out_strides", ELIST),
+                ("dtype", DTYPE),
             ],
         )
     }
 
     fn rewrites(&self) -> Vec<String> {
-        vec!["
-(rule
-    (
-        (= ?a (Gather ?indexes ?out_shape ?index_strides ?data ?data_shape ?data_strides))
-        (= ?dty (dtype ?data))
-    )
-    (
-        (let ?out_strides (RowMajor ?out_shape))
-        (union ?a (KernelGather ?out_shape ?indexes ?index_strides ?data ?data_shape ?data_strides ?out_strides ?dty))
-    )
-    :name \"kernel gather\"
-)"
-        .to_string()]
+        let gather = sort(
+            IR,
+            "Gather",
+            &[
+                ("indexes", IR),
+                ("index_shape", ELIST),
+                ("index_strides", ELIST),
+                ("data", IR),
+                ("data_shape", ELIST),
+                ("data_strides", ELIST),
+            ],
+        );
+        vec![
+            rule()
+                .facts(vec![
+                    eq(
+                        v("?a"),
+                        app(
+                            &gather,
+                            vec![
+                                v("?indexes"),
+                                v("?index_shape"),
+                                v("?index_strides"),
+                                v("?data"),
+                                v("?data_shape"),
+                                v("?data_strides"),
+                            ],
+                        ),
+                    ),
+                    eq(v("?dty"), dtype_term(v("?data"))),
+                ])
+                .union(
+                    v("?a"),
+                    app(
+                        &self.sort(),
+                        vec![
+                            v("?index_shape"),
+                            v("?indexes"),
+                            v("?index_strides"),
+                            v("?data"),
+                            v("?data_shape"),
+                            v("?data_strides"),
+                            app(&SORTS.row_major, vec![v("?index_shape")]),
+                            v("?dty"),
+                        ],
+                    ),
+                )
+                .to_egglog_string(),
+        ]
     }
 
     fn cleanup(&self) -> bool {
@@ -881,27 +923,21 @@ pub struct KernelIota {
 impl EgglogOp for KernelIota {
     fn sort(&self) -> SortDef {
         sort(
-            &IR,
+            IR,
             "KernelIota",
-            &[("expr", &EXPRESSION), ("range", &EXPRESSION)],
+            &[("expr", EXPRESSION), ("range", EXPRESSION)],
         )
     }
 
     fn rewrites(&self) -> Vec<String> {
+        let iota = sort(IR, "Iota", &[("expr", EXPRESSION), ("range", EXPRESSION)]);
+        let kernel_iota = app(&self.sort(), vec![v("?expr"), v("?range")]);
         vec![
-            "
-(rule
-    (
-        (= ?a (Iota ?expr ?range))
-    )
-    (
-        (let ?kernel_iota (KernelIota ?expr ?range))
-        (union ?a ?kernel_iota)
-        (set (dtype ?kernel_iota) (Int))
-    )
-    :name \"kernel iota\"
-)"
-            .to_string(),
+            rule()
+                .fact(eq(v("?a"), app(&iota, vec![v("?expr"), v("?range")])))
+                .union(v("?a"), kernel_iota.clone())
+                .set(dtype_term(kernel_iota), app(&SORTS.int_dt, vec![]))
+                .to_egglog_string(),
         ]
     }
 
@@ -1014,33 +1050,20 @@ pub struct KernelExp2 {
 impl EgglogOp for KernelExp2 {
     fn sort(&self) -> SortDef {
         sort(
-            &IR,
+            IR,
             "KernelExp2",
             &[
-                ("shape", &ELIST),
-                ("inp", &IR),
-                ("strides", &ELIST),
-                ("out_strides", &ELIST),
-                ("dtype", &DTYPE),
+                ("shape", ELIST),
+                ("inp", IR),
+                ("strides", ELIST),
+                ("out_strides", ELIST),
+                ("dtype", DTYPE),
             ],
         )
     }
 
     fn rewrites(&self) -> Vec<String> {
-        vec![
-            "
-(rule
-    (
-        (= ?a (Exp2 ?shape ?inp ?in_strides ?out_strides))
-        (= ?dty (dtype ?inp))
-    )
-    (
-        (union ?a (KernelExp2 ?shape ?inp ?in_strides ?out_strides ?dty))
-    )
-    :name \"kernel exp2\"
-)"
-            .to_string(),
-        ]
+        vec![kernel_rewrite::<Exp2, Self>()]
     }
 
     fn cleanup(&self) -> bool {
@@ -1160,33 +1183,20 @@ pub struct KernelLog2 {
 impl EgglogOp for KernelLog2 {
     fn sort(&self) -> SortDef {
         sort(
-            &IR,
+            IR,
             "KernelLog2",
             &[
-                ("shape", &ELIST),
-                ("inp", &IR),
-                ("strides", &ELIST),
-                ("out_strides", &ELIST),
-                ("dtype", &DTYPE),
+                ("shape", ELIST),
+                ("inp", IR),
+                ("strides", ELIST),
+                ("out_strides", ELIST),
+                ("dtype", DTYPE),
             ],
         )
     }
 
     fn rewrites(&self) -> Vec<String> {
-        vec![
-            "
-(rule
-    (
-        (= ?a (Log2 ?shape ?inp ?in_strides ?out_strides))
-        (= ?dty (dtype ?inp))
-    )
-    (
-        (union ?a (KernelLog2 ?shape ?inp ?in_strides ?out_strides ?dty))
-    )
-    :name \"kernel log2\"
-)"
-            .to_string(),
-        ]
+        vec![kernel_rewrite::<Log2, Self>()]
     }
 
     fn cleanup(&self) -> bool {
@@ -1306,33 +1316,20 @@ pub struct KernelSin {
 impl EgglogOp for KernelSin {
     fn sort(&self) -> SortDef {
         sort(
-            &IR,
+            IR,
             "KernelSin",
             &[
-                ("shape", &ELIST),
-                ("inp", &IR),
-                ("strides", &ELIST),
-                ("out_strides", &ELIST),
-                ("dtype", &DTYPE),
+                ("shape", ELIST),
+                ("inp", IR),
+                ("strides", ELIST),
+                ("out_strides", ELIST),
+                ("dtype", DTYPE),
             ],
         )
     }
 
     fn rewrites(&self) -> Vec<String> {
-        vec![
-            "
-(rule
-    (
-        (= ?a (Sin ?shape ?inp ?in_strides ?out_strides))
-        (= ?dty (dtype ?inp))
-    )
-    (
-        (union ?a (KernelSin ?shape ?inp ?in_strides ?out_strides ?dty))
-    )
-    :name \"kernel sin\"
-)"
-            .to_string(),
-        ]
+        vec![kernel_rewrite::<Sin, Self>()]
     }
 
     fn cleanup(&self) -> bool {
@@ -1452,33 +1449,20 @@ pub struct KernelRecip {
 impl EgglogOp for KernelRecip {
     fn sort(&self) -> SortDef {
         sort(
-            &IR,
+            IR,
             "KernelRecip",
             &[
-                ("shape", &ELIST),
-                ("inp", &IR),
-                ("strides", &ELIST),
-                ("out_strides", &ELIST),
-                ("dtype", &DTYPE),
+                ("shape", ELIST),
+                ("inp", IR),
+                ("strides", ELIST),
+                ("out_strides", ELIST),
+                ("dtype", DTYPE),
             ],
         )
     }
 
     fn rewrites(&self) -> Vec<String> {
-        vec![
-            "
-(rule
-    (
-        (= ?a (Recip ?shape ?inp ?in_strides ?out_strides))
-        (= ?dty (dtype ?inp))
-    )
-    (
-        (union ?a (KernelRecip ?shape ?inp ?in_strides ?out_strides ?dty))
-    )
-    :name \"kernel recip\"
-)"
-            .to_string(),
-        ]
+        vec![kernel_rewrite::<Recip, Self>()]
     }
 
     fn cleanup(&self) -> bool {
@@ -1598,33 +1582,20 @@ pub struct KernelSqrt {
 impl EgglogOp for KernelSqrt {
     fn sort(&self) -> SortDef {
         sort(
-            &IR,
+            IR,
             "KernelSqrt",
             &[
-                ("shape", &ELIST),
-                ("inp", &IR),
-                ("strides", &ELIST),
-                ("out_strides", &ELIST),
-                ("dtype", &DTYPE),
+                ("shape", ELIST),
+                ("inp", IR),
+                ("strides", ELIST),
+                ("out_strides", ELIST),
+                ("dtype", DTYPE),
             ],
         )
     }
 
     fn rewrites(&self) -> Vec<String> {
-        vec![
-            "
-(rule
-    (
-        (= ?a (Sqrt ?shape ?inp ?in_strides ?out_strides))
-        (= ?dty (dtype ?inp))
-    )
-    (
-        (union ?a (KernelSqrt ?shape ?inp ?in_strides ?out_strides ?dty))
-    )
-    :name \"kernel sqrt\"
-)"
-            .to_string(),
-        ]
+        vec![kernel_rewrite::<Sqrt, Self>()]
     }
 
     fn cleanup(&self) -> bool {
@@ -1749,33 +1720,22 @@ pub struct KernelMod {
 impl EgglogOp for KernelMod {
     fn sort(&self) -> SortDef {
         sort(
-            &IR,
+            IR,
             "KernelMod",
             &[
-                ("shape", &ELIST),
-                ("inp_a", &IR),
-                ("a_strides", &ELIST),
-                ("inp_b", &IR),
-                ("b_strides", &ELIST),
-                ("out_strides", &ELIST),
-                ("dtype", &DTYPE),
+                ("shape", ELIST),
+                ("inp_a", IR),
+                ("a_strides", ELIST),
+                ("inp_b", IR),
+                ("b_strides", ELIST),
+                ("out_strides", ELIST),
+                ("dtype", DTYPE),
             ],
         )
     }
 
     fn rewrites(&self) -> Vec<String> {
-        vec!["
-(rule
-    (
-        (= ?a (Mod ?out_shape ?inp_a ?inp_a_strides ?inp_b ?inp_b_strides ?out_strides))
-        (= ?dty (dtype ?inp_a))
-    )
-    (
-        (union ?a (KernelMod ?out_shape ?inp_a ?inp_a_strides ?inp_b ?inp_b_strides ?out_strides ?dty))
-    )
-    :name \"kernel mod\"
-)"
-        .to_string()]
+        vec![kernel_rewrite::<Mod, Self>()]
     }
 
     fn cleanup(&self) -> bool {
@@ -1899,35 +1859,39 @@ pub struct KernelLessThan {
 impl EgglogOp for KernelLessThan {
     fn sort(&self) -> SortDef {
         sort(
-            &IR,
+            IR,
             "KernelLessThan",
             &[
-                ("shape", &ELIST),
-                ("inp_a", &IR),
-                ("a_strides", &ELIST),
-                ("inp_b", &IR),
-                ("b_strides", &ELIST),
-                ("out_strides", &ELIST),
-                ("dtype", &DTYPE),
-                ("b_dtype", &DTYPE),
+                ("shape", ELIST),
+                ("inp_a", IR),
+                ("a_strides", ELIST),
+                ("inp_b", IR),
+                ("b_strides", ELIST),
+                ("out_strides", ELIST),
+                ("dtype", DTYPE),
+                ("b_dtype", DTYPE),
             ],
         )
     }
 
     fn rewrites(&self) -> Vec<String> {
-        vec!["
-(rule
-    (
-        (= ?a (LessThan ?out_shape ?inp_a ?inp_a_strides ?inp_b ?inp_b_strides ?out_strides))
-        (= ?dty (dtype ?inp_a))
-        (= ?b_dty (dtype ?inp_b))
-    )
-    (
-        (union ?a (KernelLessThan ?out_shape ?inp_a ?inp_a_strides ?inp_b ?inp_b_strides ?out_strides ?dty ?b_dty))
-    )
-    :name \"kernel less_than\"
-)"
-        .to_string()]
+        let hlir = LessThan::default().sort();
+        let hlir_vars: Vec<Term> = hlir
+            .fields
+            .iter()
+            .map(|f| v(&format!("?{}", f.name)))
+            .collect();
+        let mut args = hlir_vars.clone();
+        args.push(v("?dtype_a"));
+        args.push(v("?dtype_b"));
+        vec![
+            rule()
+                .fact(eq(v("?a"), app(&hlir, hlir_vars)))
+                .fact(eq(v("?dtype_a"), dtype_term(v("?inp_a"))))
+                .fact(eq(v("?dtype_b"), dtype_term(v("?inp_b"))))
+                .union(v("?a"), app(&self.sort(), args))
+                .to_egglog_string(),
+        ]
     }
 
     fn cleanup(&self) -> bool {
@@ -2051,24 +2015,18 @@ pub struct KernelConstant {
 
 impl EgglogOp for KernelConstant {
     fn sort(&self) -> SortDef {
-        sort(&IR, "KernelConstant", &[("value", &F64)])
+        sort(IR, "KernelConstant", &[("value", F64)])
     }
 
     fn rewrites(&self) -> Vec<String> {
+        let constant = sort(IR, "Constant", &[("value", F64)]);
+        let kernel_const = app(&self.sort(), vec![v("?value")]);
         vec![
-            "
-(rule
-    (
-        (= ?a (Constant ?value))
-    )
-    (
-        (let ?kernel_const (KernelConstant ?value))
-        (union ?a ?kernel_const)
-        (set (dtype ?kernel_const) (F32))
-    )
-    :name \"kernel constant\"
-)"
-            .to_string(),
+            rule()
+                .fact(eq(v("?a"), app(&constant, vec![v("?value")])))
+                .union(v("?a"), kernel_const.clone())
+                .set(dtype_term(kernel_const), app(&SORTS.f32_dt, vec![]))
+                .to_egglog_string(),
         ]
     }
 
@@ -2170,31 +2128,40 @@ pub struct KernelCast {
 impl EgglogOp for KernelCast {
     fn sort(&self) -> SortDef {
         sort(
-            &IR,
+            IR,
             "KernelCast",
             &[
-                ("inp", &IR),
-                ("size", &EXPRESSION),
-                ("dtype", &DTYPE),
-                ("src_dtype", &DTYPE),
+                ("inp", IR),
+                ("size", EXPRESSION),
+                ("dtype", DTYPE),
+                ("src_dtype", DTYPE),
             ],
         )
     }
 
     fn rewrites(&self) -> Vec<String> {
+        let cast = sort(
+            IR,
+            "Cast",
+            &[("inp", IR), ("size", EXPRESSION), ("dtype", DTYPE)],
+        );
         vec![
-            "
-(rule
-    (
-        (= ?a (Cast ?inp ?size ?out_dty))
-        (= ?in_dty (dtype ?inp))
-    )
-    (
-        (union ?a (KernelCast ?inp ?size ?in_dty ?out_dty))
-    )
-    :name \"kernel cast\"
-)"
-            .to_string(),
+            rule()
+                .facts(vec![
+                    eq(
+                        v("?a"),
+                        app(&cast, vec![v("?inp"), v("?size"), v("?out_dty")]),
+                    ),
+                    eq(v("?in_dty"), dtype_term(v("?inp"))),
+                ])
+                .union(
+                    v("?a"),
+                    app(
+                        &self.sort(),
+                        vec![v("?inp"), v("?size"), v("?in_dty"), v("?out_dty")],
+                    ),
+                )
+                .to_egglog_string(),
         ]
     }
 

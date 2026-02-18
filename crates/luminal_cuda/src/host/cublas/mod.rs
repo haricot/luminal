@@ -67,19 +67,19 @@ impl Default for CuBlasSgemmV2 {
 impl EgglogOp for CuBlasSgemmV2 {
     fn sort(&self) -> SortDef {
         sort(
-            &IR,
+            IR,
             "cublasSgemmV2",
             &[
-                ("a", &IR),
-                ("b", &IR),
-                ("m", &EXPRESSION),
-                ("n", &EXPRESSION),
-                ("k", &EXPRESSION),
-                ("a_layout", &STRING),
-                ("b_layout", &STRING),
-                ("lda", &EXPRESSION),
-                ("ldb", &EXPRESSION),
-                ("ldc", &EXPRESSION),
+                ("a", IR),
+                ("b", IR),
+                ("m", EXPRESSION),
+                ("n", EXPRESSION),
+                ("k", EXPRESSION),
+                ("a_layout", STRING),
+                ("b_layout", STRING),
+                ("lda", EXPRESSION),
+                ("ldb", EXPRESSION),
+                ("ldc", EXPRESSION),
             ],
         )
     }

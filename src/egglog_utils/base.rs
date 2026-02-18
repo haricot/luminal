@@ -253,109 +253,57 @@ pub struct BaseSorts {
 impl BaseSorts {
     pub fn new() -> Self {
         Self {
-            m_num: sort(&EXPRESSION, "MNum", &[("n", &I64)]),
-            m_float: sort(&EXPRESSION, "MFloat", &[("n", &F64)]),
-            m_iter: sort(&EXPRESSION, "MIter", &[]),
-            m_var: sort(&EXPRESSION, "MVar", &[("name", &STRING)]),
-            m_add: sort(
-                &EXPRESSION,
-                "MAdd",
-                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
-            ),
-            m_sub: sort(
-                &EXPRESSION,
-                "MSub",
-                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
-            ),
-            m_mul: sort(
-                &EXPRESSION,
-                "MMul",
-                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
-            ),
+            m_num: sort(EXPRESSION, "MNum", &[("n", I64)]),
+            m_float: sort(EXPRESSION, "MFloat", &[("n", F64)]),
+            m_iter: sort(EXPRESSION, "MIter", &[]),
+            m_var: sort(EXPRESSION, "MVar", &[("name", STRING)]),
+            m_add: sort(EXPRESSION, "MAdd", &[("a", EXPRESSION), ("b", EXPRESSION)]),
+            m_sub: sort(EXPRESSION, "MSub", &[("a", EXPRESSION), ("b", EXPRESSION)]),
+            m_mul: sort(EXPRESSION, "MMul", &[("a", EXPRESSION), ("b", EXPRESSION)]),
             m_ceildiv: sort(
-                &EXPRESSION,
+                EXPRESSION,
                 "MCeilDiv",
-                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
+                &[("a", EXPRESSION), ("b", EXPRESSION)],
             ),
-            m_div: sort(
-                &EXPRESSION,
-                "MDiv",
-                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
-            ),
-            m_mod: sort(
-                &EXPRESSION,
-                "MMod",
-                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
-            ),
-            m_min: sort(
-                &EXPRESSION,
-                "MMin",
-                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
-            ),
-            m_max: sort(
-                &EXPRESSION,
-                "MMax",
-                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
-            ),
-            m_and: sort(
-                &EXPRESSION,
-                "MAnd",
-                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
-            ),
-            m_or: sort(
-                &EXPRESSION,
-                "MOr",
-                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
-            ),
-            m_gte: sort(
-                &EXPRESSION,
-                "MGte",
-                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
-            ),
-            m_lt: sort(
-                &EXPRESSION,
-                "MLt",
-                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
-            ),
+            m_div: sort(EXPRESSION, "MDiv", &[("a", EXPRESSION), ("b", EXPRESSION)]),
+            m_mod: sort(EXPRESSION, "MMod", &[("a", EXPRESSION), ("b", EXPRESSION)]),
+            m_min: sort(EXPRESSION, "MMin", &[("a", EXPRESSION), ("b", EXPRESSION)]),
+            m_max: sort(EXPRESSION, "MMax", &[("a", EXPRESSION), ("b", EXPRESSION)]),
+            m_and: sort(EXPRESSION, "MAnd", &[("a", EXPRESSION), ("b", EXPRESSION)]),
+            m_or: sort(EXPRESSION, "MOr", &[("a", EXPRESSION), ("b", EXPRESSION)]),
+            m_gte: sort(EXPRESSION, "MGte", &[("a", EXPRESSION), ("b", EXPRESSION)]),
+            m_lt: sort(EXPRESSION, "MLt", &[("a", EXPRESSION), ("b", EXPRESSION)]),
             m_floorto: sort(
-                &EXPRESSION,
+                EXPRESSION,
                 "MFloorTo",
-                &[("a", &EXPRESSION), ("b", &EXPRESSION)],
+                &[("a", EXPRESSION), ("b", EXPRESSION)],
             ),
             m_replace: sort(
-                &EXPRESSION,
+                EXPRESSION,
                 "MReplace",
-                &[
-                    ("x", &EXPRESSION),
-                    ("from", &EXPRESSION),
-                    ("to", &EXPRESSION),
-                ],
+                &[("x", EXPRESSION), ("from", EXPRESSION), ("to", EXPRESSION)],
             ),
 
-            e_cons: sort(&ELIST, "ECons", &[("head", &EXPRESSION), ("tail", &ELIST)]),
-            e_nil: sort(&ELIST, "ENil", &[]),
+            e_cons: sort(ELIST, "ECons", &[("head", EXPRESSION), ("tail", ELIST)]),
+            e_nil: sort(ELIST, "ENil", &[]),
             m_replace_list: sort(
-                &ELIST,
+                ELIST,
                 "MReplaceList",
-                &[("list", &ELIST), ("from", &EXPRESSION), ("to", &EXPRESSION)],
+                &[("list", ELIST), ("from", EXPRESSION), ("to", EXPRESSION)],
             ),
             replace_nth_from_end: sort(
-                &ELIST,
+                ELIST,
                 "ReplaceNthFromEnd",
-                &[("list", &ELIST), ("to", &EXPRESSION), ("ind", &I64)],
+                &[("list", ELIST), ("to", EXPRESSION), ("ind", I64)],
             ),
-            remove_nth_from_end: sort(
-                &ELIST,
-                "RemoveNthFromEnd",
-                &[("list", &ELIST), ("ind", &I64)],
-            ),
-            row_major: sort(&ELIST, "RowMajor", &[("list", &ELIST)]),
+            remove_nth_from_end: sort(ELIST, "RemoveNthFromEnd", &[("list", ELIST), ("ind", I64)]),
+            row_major: sort(ELIST, "RowMajor", &[("list", ELIST)]),
 
-            f32_dt: sort(&DTYPE, "F32", &[]),
-            f16_dt: sort(&DTYPE, "F16", &[]),
-            bf16_dt: sort(&DTYPE, "Bf16", &[]),
-            int_dt: sort(&DTYPE, "Int", &[]),
-            bool_dt: sort(&DTYPE, "Bool", &[]),
+            f32_dt: sort(DTYPE, "F32", &[]),
+            f16_dt: sort(DTYPE, "F16", &[]),
+            bf16_dt: sort(DTYPE, "Bf16", &[]),
+            int_dt: sort(DTYPE, "Int", &[]),
+            bool_dt: sort(DTYPE, "Bool", &[]),
 
             p_add: func("+", &["a", "b"]),
             p_sub: func("-", &["a", "b"]),
@@ -376,9 +324,9 @@ impl BaseSorts {
 
     /// Register all sort classes and variants into a Program.
     pub fn register(&self, p: &mut Program) {
-        p.add_class(&EXPRESSION);
-        p.add_class(&ELIST);
-        p.add_class(&DTYPE);
+        p.add_class(EXPRESSION);
+        p.add_class(ELIST);
+        p.add_class(DTYPE);
 
         for s in [
             &self.m_num,
@@ -432,13 +380,13 @@ impl OpSorts {
     /// Unary op: (shape: EList, inp: IR, strides: EList, out_strides: EList)
     pub fn unary(&self, name: &str) -> SortDef {
         sort(
-            &IR,
+            IR,
             name,
             &[
-                ("shape", &ELIST),
-                ("inp", &IR),
-                ("strides", &ELIST),
-                ("out_strides", &ELIST),
+                ("shape", ELIST),
+                ("inp", IR),
+                ("strides", ELIST),
+                ("out_strides", ELIST),
             ],
         )
     }
@@ -446,15 +394,15 @@ impl OpSorts {
     /// Binary op: (shape: EList, inp_a: IR, a_strides: EList, inp_b: IR, b_strides: EList, out_strides: EList)
     pub fn binary(&self, name: &str) -> SortDef {
         sort(
-            &IR,
+            IR,
             name,
             &[
-                ("shape", &ELIST),
-                ("inp_a", &IR),
-                ("a_strides", &ELIST),
-                ("inp_b", &IR),
-                ("b_strides", &ELIST),
-                ("out_strides", &ELIST),
+                ("shape", ELIST),
+                ("inp_a", IR),
+                ("a_strides", ELIST),
+                ("inp_b", IR),
+                ("b_strides", ELIST),
+                ("out_strides", ELIST),
             ],
         )
     }
@@ -462,15 +410,15 @@ impl OpSorts {
     /// Reduce op: (shape: EList, iters: Expression, inp: IR, strides: EList, iter_stride: Expression, out_strides: EList)
     pub fn reduce(&self, name: &str) -> SortDef {
         sort(
-            &IR,
+            IR,
             name,
             &[
-                ("shape", &ELIST),
-                ("iters", &EXPRESSION),
-                ("inp", &IR),
-                ("strides", &ELIST),
-                ("iter_stride", &EXPRESSION),
-                ("out_strides", &ELIST),
+                ("shape", ELIST),
+                ("iters", EXPRESSION),
+                ("inp", IR),
+                ("strides", ELIST),
+                ("iter_stride", EXPRESSION),
+                ("out_strides", ELIST),
             ],
         )
     }

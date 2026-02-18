@@ -7,7 +7,11 @@ use cudarc::{
 };
 use itertools::Itertools;
 use luminal::{
-    egglog_utils::{api::{sort, SortDef}, base::{DTYPE, ELIST, EXPRESSION, IR}, extract_dtype, extract_expr, extract_expr_list},
+    egglog_utils::{
+        api::{SortDef, sort},
+        base::{DTYPE, ELIST, EXPRESSION, IR},
+        extract_dtype, extract_expr, extract_expr_list,
+    },
     op::*,
     prelude::*,
 };
@@ -26,11 +30,19 @@ pub struct KernelMeanReduce {
 }
 impl EgglogOp for KernelMeanReduce {
     fn sort(&self) -> SortDef {
-        sort(&IR, "KernelMean", &[
-            ("shape", &ELIST), ("iters", &EXPRESSION), ("inp", &IR),
-            ("strides", &ELIST), ("iter_stride", &EXPRESSION), ("out_strides", &ELIST),
-            ("dtype", &DTYPE),
-        ])
+        sort(
+            IR,
+            "KernelMean",
+            &[
+                ("shape", ELIST),
+                ("iters", EXPRESSION),
+                ("inp", IR),
+                ("strides", ELIST),
+                ("iter_stride", EXPRESSION),
+                ("out_strides", ELIST),
+                ("dtype", DTYPE),
+            ],
+        )
     }
 
     fn rewrites(&self) -> Vec<String> {

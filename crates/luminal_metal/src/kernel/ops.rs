@@ -1092,7 +1092,7 @@ pub struct MetalConstant {
 
 impl EgglogOp for MetalConstant {
     fn sort(&self) -> SortDef {
-        sort(&IR, "MetalConstant", &[("value", &F64)])
+        sort(IR, "MetalConstant", &[("value", F64)])
     }
 
     fn rewrites(&self) -> Vec<String> {
@@ -1191,9 +1191,9 @@ pub struct MetalIota {
 impl EgglogOp for MetalIota {
     fn sort(&self) -> SortDef {
         sort(
-            &IR,
+            IR,
             "MetalIota",
-            &[("expr", &EXPRESSION), ("range", &EXPRESSION)],
+            &[("expr", EXPRESSION), ("range", EXPRESSION)],
         )
     }
 
@@ -1297,15 +1297,15 @@ pub struct MetalGather {
 impl EgglogOp for MetalGather {
     fn sort(&self) -> SortDef {
         sort(
-            &IR,
+            IR,
             "MetalGather",
             &[
-                ("out_shape", &ELIST),
-                ("indexes", &IR),
-                ("index_strides", &ELIST),
-                ("data", &IR),
-                ("data_strides", &ELIST),
-                ("out_strides", &ELIST),
+                ("out_shape", ELIST),
+                ("indexes", IR),
+                ("index_strides", ELIST),
+                ("data", IR),
+                ("data_strides", ELIST),
+                ("out_strides", ELIST),
             ],
         )
     }
@@ -1455,9 +1455,9 @@ pub struct MetalCast {
 impl EgglogOp for MetalCast {
     fn sort(&self) -> SortDef {
         sort(
-            &IR,
+            IR,
             "MetalCast",
-            &[("inp", &IR), ("size", &EXPRESSION), ("dtype", &DTYPE)],
+            &[("inp", IR), ("size", EXPRESSION), ("dtype", DTYPE)],
         )
     }
 

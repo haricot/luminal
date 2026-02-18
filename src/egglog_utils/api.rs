@@ -271,7 +271,7 @@ impl SortDef {
 // ========== Free-standing Builders ==========
 
 /// Create a sort variant definition.
-pub fn sort(class: &SortClass, name: &str, args: &[(&str, &SortClass)]) -> SortDef {
+pub fn sort(class: SortClass, name: &str, args: &[(&str, SortClass)]) -> SortDef {
     let mut seen = std::collections::HashSet::new();
     let mut fields = Vec::with_capacity(args.len());
     for (arg_name, arg_sort) in args {
@@ -315,7 +315,7 @@ pub fn var(name: &str, _sort: &SortClass) -> Term {
 }
 
 /// Create an untyped pattern variable (sort is not tracked).
-pub fn v(name: &str) -> Term {
+pub fn v(name: impl ToString) -> Term {
     Term::Var(Var {
         name: name.to_string(),
         sort: String::new(),
@@ -525,7 +525,7 @@ impl Program {
         self.rulesets.push(name.to_string());
     }
 
-    pub fn add_class(&mut self, class: &SortClass) {
+    pub fn add_class(&mut self, class: SortClass) {
         if self.classes.iter().any(|c| c.name == class.name) {
             panic!("class `{}` is already registered", class.name);
         }

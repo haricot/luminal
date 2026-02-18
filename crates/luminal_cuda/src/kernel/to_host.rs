@@ -11,6 +11,7 @@ use cudarc::driver::{
 };
 use itertools::Itertools;
 use luminal::{
+    egglog_utils::base::IR,
     graph::LLIRGraph,
     op::{EgglogOp, LLIROp},
     prelude::{
@@ -194,7 +195,7 @@ impl std::fmt::Debug for CudaGraphOp {
 
 impl EgglogOp for CudaGraphOp {
     fn sort(&self) -> luminal::egglog_utils::api::SortDef {
-        luminal::egglog_utils::api::sort(&luminal::egglog_utils::base::IR, "CudaGraphOp", &[])
+        luminal::egglog_utils::api::sort(IR, "CudaGraphOp", &[])
     }
 
     fn rewrites(&self) -> Vec<String> {

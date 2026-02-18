@@ -2,7 +2,7 @@ use std::fmt::Display;
 use std::{fmt::Debug, sync::Arc};
 
 use crate::egglog_utils::api::{SortDef, Term, app, eq, rule, sort, v};
-use crate::egglog_utils::base::{DTYPE, ELIST, EXPRESSION, F64, I64, ILIST, IR, OP_SORTS, SORTS, STRING};
+use crate::egglog_utils::base::*;
 use crate::egglog_utils::elist_to_egglog;
 use crate::egglog_utils::extract_dtype;
 use crate::egglog_utils::extract_expr;
@@ -112,9 +112,9 @@ impl Display for Input {
 impl EgglogOp for Input {
     fn sort(&self) -> SortDef {
         sort(
-            &IR,
+            IR,
             "Input",
-            &[("node", &I64), ("label", &STRING), ("dtype", &DTYPE)],
+            &[("node", I64), ("label", STRING), ("dtype", DTYPE)],
         )
     }
 
@@ -178,7 +178,7 @@ impl Display for Output {
 
 impl EgglogOp for Output {
     fn sort(&self) -> SortDef {
-        sort(&IR, "Output", &[("inp", &IR), ("node", &I64)])
+        sort(IR, "Output", &[("inp", IR), ("node", I64)])
     }
 
     fn cleanup(&self) -> bool {
@@ -236,9 +236,9 @@ impl Display for CustomOpHLIR {
 impl EgglogOp for CustomOpHLIR {
     fn sort(&self) -> SortDef {
         sort(
-            &IR,
+            IR,
             "CustomOpHLIR",
-            &[("inputs", &ILIST), ("id", &I64), ("dtype", &DTYPE)],
+            &[("inputs", ILIST), ("id", I64), ("dtype", DTYPE)],
         )
     }
 
@@ -291,7 +291,7 @@ impl HLIROp for Constant {
 
 impl EgglogOp for Constant {
     fn sort(&self) -> SortDef {
-        sort(&IR, "Constant", &[("value", &F64)])
+        sort(IR, "Constant", &[("value", F64)])
     }
     fn cleanup(&self) -> bool {
         true
@@ -340,7 +340,7 @@ impl HLIROp for Iota {
 }
 impl EgglogOp for Iota {
     fn sort(&self) -> SortDef {
-        sort(&IR, "Iota", &[("expr", &EXPRESSION), ("range", &EXPRESSION)])
+        sort(IR, "Iota", &[("expr", EXPRESSION), ("range", EXPRESSION)])
     }
 
     fn cleanup(&self) -> bool {
@@ -392,9 +392,9 @@ impl HLIROp for Cast {
 impl EgglogOp for Cast {
     fn sort(&self) -> SortDef {
         sort(
-            &IR,
+            IR,
             "Cast",
-            &[("inp", &IR), ("size", &EXPRESSION), ("dtype", &DTYPE)],
+            &[("inp", IR), ("size", EXPRESSION), ("dtype", DTYPE)],
         )
     }
 
@@ -1168,15 +1168,15 @@ impl HLIROp for Gather {
 impl EgglogOp for Gather {
     fn sort(&self) -> SortDef {
         sort(
-            &IR,
+            IR,
             "Gather",
             &[
-                ("indexes", &IR),
-                ("index_shape", &ELIST),
-                ("index_strides", &ELIST),
-                ("data", &IR),
-                ("data_shape", &ELIST),
-                ("data_strides", &ELIST),
+                ("indexes", IR),
+                ("index_shape", ELIST),
+                ("index_strides", ELIST),
+                ("data", IR),
+                ("data_shape", ELIST),
+                ("data_strides", ELIST),
             ],
         )
     }
