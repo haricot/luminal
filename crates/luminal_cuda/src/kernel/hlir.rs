@@ -543,8 +543,8 @@ impl KernelOp for KernelAdd {
             .chain(self.out_stride.iter().flat_map(|e| e.dyn_vars()))
             .collect::<FxHashSet<_>>();
         let dtype = cuda_dtype(self.dtype);
-        let b_dtype = cuda_dtype(self.b_dtype);
-        let includes = dtype_includes(&[self.dtype, self.b_dtype]);
+
+        let includes = dtype_includes(&[self.dtype, self.dtype]);
         let (dyn_defines, _sorted_dims) = generate_dyn_dims_defines(&vars);
         // Add dyn_dims parameter if we have dynamic dimensions
         let dyn_dims_param = if vars.is_empty() {
@@ -568,7 +568,7 @@ extern \"C\" {{
         let (module, func) = if let Some((module, func)) = compile_cache.get(&kernel) {
             (module.clone(), func.clone())
         } else {
-            let ptx = compile_kernel(&kernel, &[self.dtype, self.b_dtype]);
+            let ptx = compile_kernel(&kernel, &[self.dtype, self.dtype]);
             let module = stream.context().load_module(ptx).unwrap();
             let func = module.load_function("add_k").unwrap();
             compile_cache.insert(kernel.clone(), (module.clone(), func.clone()));
@@ -610,7 +610,7 @@ extern \"C\" {{
             DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
         }
         .into();
-        let b_elem_size: Expression = match self.b_dtype {
+        let b_elem_size: Expression = match self.dtype {
             DType::F32 | DType::Int => 4,
             DType::F16 | DType::Bf16 => 2,
             DType::Bool => 1,
@@ -710,8 +710,8 @@ impl KernelOp for KernelMul {
             .chain(self.out_stride.iter().flat_map(|e| e.dyn_vars()))
             .collect::<FxHashSet<_>>();
         let dtype = cuda_dtype(self.dtype);
-        let b_dtype = cuda_dtype(self.b_dtype);
-        let includes = dtype_includes(&[self.dtype, self.b_dtype]);
+
+        let includes = dtype_includes(&[self.dtype, self.dtype]);
         let (dyn_defines, _sorted_dims) = generate_dyn_dims_defines(&vars);
         let dyn_dims_param = if vars.is_empty() {
             ""
@@ -734,7 +734,7 @@ extern \"C\" {{
         let (module, func) = if let Some((module, func)) = compile_cache.get(&kernel) {
             (module.clone(), func.clone())
         } else {
-            let ptx = compile_kernel(&kernel, &[self.dtype, self.b_dtype]);
+            let ptx = compile_kernel(&kernel, &[self.dtype, self.dtype]);
             let module = stream.context().load_module(ptx).unwrap();
             let func = module.load_function("mul_k").unwrap();
             compile_cache.insert(kernel.clone(), (module.clone(), func.clone()));
@@ -775,7 +775,7 @@ extern \"C\" {{
             DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
         }
         .into();
-        let b_elem_size: Expression = match self.b_dtype {
+        let b_elem_size: Expression = match self.dtype {
             DType::F32 | DType::Int => 4,
             DType::F16 | DType::Bf16 => 2,
             DType::Bool => 1,
@@ -2051,8 +2051,8 @@ impl KernelOp for KernelLessThan {
             .chain(self.out_stride.iter().flat_map(|e| e.dyn_vars()))
             .collect::<FxHashSet<_>>();
         let dtype = cuda_dtype(self.dtype);
-        let b_dtype = cuda_dtype(self.b_dtype);
-        let includes = dtype_includes(&[self.dtype, self.b_dtype]);
+
+        let includes = dtype_includes(&[self.dtype, self.dtype]);
         let (dyn_defines, _sorted_dims) = generate_dyn_dims_defines(&vars);
         let dyn_dims_param = if vars.is_empty() {
             ""
@@ -2075,7 +2075,7 @@ extern \"C\" {{
         let (module, func) = if let Some((module, func)) = compile_cache.get(&kernel) {
             (module.clone(), func.clone())
         } else {
-            let ptx = compile_kernel(&kernel, &[self.dtype, self.b_dtype]);
+            let ptx = compile_kernel(&kernel, &[self.dtype, self.dtype]);
             let module = stream.context().load_module(ptx).unwrap();
             let func = module.load_function("less_than_k").unwrap();
             compile_cache.insert(kernel.clone(), (module.clone(), func.clone()));
@@ -2110,7 +2110,7 @@ extern \"C\" {{
             DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
         }
         .into();
-        let b_elem_size: Expression = match self.b_dtype {
+        let b_elem_size: Expression = match self.dtype {
             DType::F32 | DType::Int => 4,
             DType::F16 | DType::Bf16 => 2,
             DType::Bool => 1,
@@ -2402,17 +2402,25 @@ pub struct KernelEmbed {
 }
 
 impl EgglogOp for KernelEmbed {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "KernelEmbed".to_string(),
-            vec![EList, Input, EList, Input, EList, Expr],
+    fn sort(&self) -> SortDef {
+        sort(
+            IR,
+            "KernelEmbed",
+            &[
+                ("batch_shape", ELIST),
+                ("token_ids", IR),
+                ("token_stride", ELIST),
+                ("embed_table", IR),
+                ("out_stride", ELIST),
+                ("embed_dim", EXPRESSION),
+            ],
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![
             // Match Gather with Add(Mul(Cast(token_ids), const), Iota) indices
-            "(rule
+            Rule::raw("(rule
                 (
                     (= ?gather (Gather ?indices ?idx_shape ?idx_stride ?embed_table ?embed_shape ?embed_stride))
                     (= ?indices (Add ?add_shape ?mul_result ?mul_stride ?iota_result ?iota_stride ?add_out_stride))
@@ -2428,9 +2436,9 @@ impl EgglogOp for KernelEmbed {
                     (set (dtype ?ke) (F32))
                 )
                 :name \"kernel embed with cast mul\"
-            )".to_string(),
+            )"),
             // Match Gather with Add(Iota, Mul(Cast(token_ids), const)) indices (reversed order)
-            "(rule
+            Rule::raw("(rule
                 (
                     (= ?gather (Gather ?indices ?idx_shape ?idx_stride ?embed_table ?embed_shape ?embed_stride))
                     (= ?indices (Add ?add_shape ?iota_result ?iota_stride ?mul_result ?mul_stride ?add_out_stride))
@@ -2446,9 +2454,9 @@ impl EgglogOp for KernelEmbed {
                     (set (dtype ?ke) (F32))
                 )
                 :name \"kernel embed with cast mul reversed\"
-            )".to_string(),
+            )"),
             // Match Gather with Add(Mul(token_ids, const), Iota) indices (no Cast)
-            "(rule
+            Rule::raw("(rule
                 (
                     (= ?gather (Gather ?indices ?idx_shape ?idx_stride ?embed_table ?embed_shape ?embed_stride))
                     (= ?indices (Add ?add_shape ?mul_result ?mul_stride ?iota_result ?iota_stride ?add_out_stride))
@@ -2463,9 +2471,9 @@ impl EgglogOp for KernelEmbed {
                     (set (dtype ?ke) (F32))
                 )
                 :name \"kernel embed with mul\"
-            )".to_string(),
+            )"),
             // Match Gather with Add(Iota, Mul(token_ids, const)) indices (reversed order, no Cast)
-            "(rule
+            Rule::raw("(rule
                 (
                     (= ?gather (Gather ?indices ?idx_shape ?idx_stride ?embed_table ?embed_shape ?embed_stride))
                     (= ?indices (Add ?add_shape ?iota_result ?iota_stride ?mul_result ?mul_stride ?add_out_stride))
@@ -2480,7 +2488,7 @@ impl EgglogOp for KernelEmbed {
                     (set (dtype ?ke) (F32))
                 )
                 :name \"kernel embed with mul reversed\"
-            )".to_string(),
+            )"),
         ]
     }
 

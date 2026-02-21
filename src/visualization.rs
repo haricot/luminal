@@ -112,14 +112,12 @@ fn graph_to_dot(
 ) -> String {
     let mut dot = String::from("digraph {\n");
     let mut map = std::collections::HashMap::new();
-    let mut next_id = 0usize;
 
-    for node in graph.node_indices() {
+    for (next_id, node) in graph.node_indices().enumerate() {
         let weight = graph.node_weight(node).unwrap();
         let label = escape_dot_string(&format!("{}", weight));
         let tooltip = escape_dot_string(&format!("{:?}", weight));
         let id = next_id;
-        next_id += 1;
         map.insert(node, id);
 
         let is_marked = mark_nodes

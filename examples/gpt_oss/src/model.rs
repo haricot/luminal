@@ -1,6 +1,10 @@
 use luminal::{
+    egglog_utils::{
+        api::{Rule, SortDef, sort},
+        base::IR,
+    },
     graph::Graph,
-    op::{CustomOp, EgglogOp, LLIROp, OpParam},
+    op::{CustomOp, EgglogOp, LLIROp},
     prelude::{FxHashMap, GraphTensor, NodeIndex},
     shape::{flatten_mul_strides, Expression, ToShape},
 };
@@ -1041,13 +1045,10 @@ impl Default for MoeExperts {
 }
 
 impl EgglogOp for MoeExperts {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "MoeExperts".to_string(),
-            vec![OpParam::Input, OpParam::Input],
-        )
+    fn sort(&self) -> SortDef {
+        sort(IR, "MoeExperts", &[("a", IR), ("b", IR)])
     }
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![]
     }
     fn cleanup(&self) -> bool {

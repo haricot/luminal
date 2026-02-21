@@ -1,9 +1,9 @@
 use std::fmt::Display;
 use std::{fmt::Debug, sync::Arc};
 
-use crate::egglog_utils::api::{rule, set};
+use crate::egglog_utils::api::{eq, v};
 use crate::egglog_utils::{
-    api::{Rule, SortDef, sort},
+    api::{Action, Rule, SortDef, sort},
     base::*,
     *,
 };
@@ -17,19 +17,30 @@ use itertools::Itertools;
 /// Matches the op, reads dtype from the named source field, and sets it on the op.
 fn dtype_propagation_rule(sort: &SortDef, dtype_source: &str) -> Rule {
     let (args, op_match) = sort.new_call();
-    rule(set(dtype(op_match), dtype(args[dtype_source].clone())))
+    let e = v("__e");
+    let dty = v("__dty");
+    Rule::new()
+        .fact(eq(e.clone(), op_match))
+        .fact(eq(dty.clone(), dtype(args[dtype_source].clone())))
+        .action(Action::Set(dtype(e), dty))
 }
 
 /// Helper: build a dtype-from-field rule (dtype comes directly from a field variable).
 fn dtype_from_field_rule(sort: &SortDef, dtype_field: &str) -> Rule {
     let (args, op_match) = sort.new_call();
-    rule(set(dtype(op_match), args[dtype_field].clone()))
+    let e = v("__e");
+    Rule::new()
+        .fact(eq(e.clone(), op_match))
+        .action(Action::Set(dtype(e), args[dtype_field].clone()))
 }
 
 /// Helper: build a rule that sets a fixed dtype on an op.
 fn dtype_fixed_rule(sort: &SortDef, dtype_sort: &SortDef) -> Rule {
     let (_, op_match) = sort.new_call();
-    rule(set(dtype(op_match), dtype_sort.call(())))
+    let e = v("__e");
+    Rule::new()
+        .fact(eq(e.clone(), op_match))
+        .action(Action::Set(dtype(e), dtype_sort.call(())))
 }
 use num_traits::Float;
 use petgraph::{Direction, algo::toposort, prelude::StableGraph, visit::EdgeRef};

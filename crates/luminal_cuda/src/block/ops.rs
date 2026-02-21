@@ -4,7 +4,7 @@ use cudarc::driver::CudaStream;
 use luminal::{
     egglog_utils::{
         api::{Rule, SortDef, sort},
-        base::{ELIST, EXPRESSION, IR},
+        base::{ELIST, EXPRESSION, F64, IR},
         extract_expr, extract_expr_list,
     },
     op::*,
@@ -2040,29 +2040,30 @@ pub struct TileMatmulNvFp4 {
 }
 
 impl EgglogOp for TileMatmulNvFp4 {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "TileMatmulNvFp4".to_string(),
-            vec![
-                Expr,  // sm_count
-                EList, // untiled_range [M, N]
-                Expr,  // m_tiles
-                Expr,  // n_tiles
-                Expr,  // total_k
-                Input, // a (FP32 activations)
-                Expr,  // a_m_stride
-                Input, // b (NvFp4 buffer: packed_data + block_scales)
-                Expr,  // out_m_stride
-                Expr,  // out_n_stride
-                Float, // tensor_scale
+    fn sort(&self) -> SortDef {
+        sort(
+            IR,
+            "TileMatmulNvFp4",
+            &[
+                ("sm_count", EXPRESSION),
+                ("untiled_range", ELIST),
+                ("m_tiles", EXPRESSION),
+                ("n_tiles", EXPRESSION),
+                ("total_k", EXPRESSION),
+                ("a", IR),
+                ("a_m_stride", EXPRESSION),
+                ("b", IR),
+                ("out_m_stride", EXPRESSION),
+                ("out_n_stride", EXPRESSION),
+                ("tensor_scale", F64),
             ],
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![
             // Match Mul -> Sum pattern where B input has NvFp4 dtype
-            format!(
+            Rule::raw(format!(
                 "
         (rule
             (
@@ -2121,7 +2122,7 @@ impl EgglogOp for TileMatmulNvFp4 {
         )",
                 ts = TILE_SIZE,
                 sm_count = 56
-            ),
+            )),
         ]
     }
 
@@ -2442,28 +2443,29 @@ pub struct TileMatmulMxfp4 {
 }
 
 impl EgglogOp for TileMatmulMxfp4 {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "TileMatmulMxfp4".to_string(),
-            vec![
-                Expr,  // sm_count
-                EList, // untiled_range [M, N]
-                Expr,  // m_tiles
-                Expr,  // n_tiles
-                Expr,  // total_k
-                Input, // a (FP32 activations)
-                Expr,  // a_m_stride
-                Input, // b (Mxfp4 buffer: packed_data + block_scales)
-                Expr,  // out_m_stride
-                Expr,  // out_n_stride
+    fn sort(&self) -> SortDef {
+        sort(
+            IR,
+            "TileMatmulMxfp4",
+            &[
+                ("sm_count", EXPRESSION),
+                ("untiled_range", ELIST),
+                ("m_tiles", EXPRESSION),
+                ("n_tiles", EXPRESSION),
+                ("total_k", EXPRESSION),
+                ("a", IR),
+                ("a_m_stride", EXPRESSION),
+                ("b", IR),
+                ("out_m_stride", EXPRESSION),
+                ("out_n_stride", EXPRESSION),
             ],
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![
             // Match Mul -> Sum pattern where B input has Mxfp4 dtype
-            format!(
+            Rule::raw(format!(
                 "
         (rule
             (
@@ -2521,7 +2523,7 @@ impl EgglogOp for TileMatmulMxfp4 {
         )",
                 ts = TILE_SIZE,
                 sm_count = 56
-            ),
+            )),
         ]
     }
 

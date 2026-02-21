@@ -250,6 +250,12 @@ pub struct BaseSorts {
     pub f_nelem: SortDef,
 }
 
+impl Default for BaseSorts {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BaseSorts {
     pub fn new() -> Self {
         Self {
@@ -371,6 +377,12 @@ pub fn dtype(e: Term) -> Term {
     app(&func("dtype", &["inp"]), vec![e])
 }
 
+impl Default for OpSorts {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OpSorts {
     pub fn new() -> Self {
         Self
@@ -433,8 +445,10 @@ pub fn base_expression_egglog() -> String {
     let s = BaseSorts::new();
 
     // Build the program
-    let mut p = Program::default();
-    p.mutual_recursive = true;
+    let mut p = Program {
+        mutual_recursive: true,
+        ..Default::default()
+    };
 
     // Rulesets
     p.add_ruleset("expr");
@@ -771,6 +785,7 @@ pub fn base_expression_egglog() -> String {
     );
 
     // Replacement distributes over binary ops
+    #[allow(clippy::type_complexity)]
     let binary_ops: Vec<(&str, Box<dyn Fn(Term, Term) -> Term>)> = vec![
         ("MAdd", Box::new(&add)),
         ("MSub", Box::new(&sub)),
@@ -998,6 +1013,7 @@ pub fn base_cleanup_egglog() -> String {
     p.add_ruleset("base_cleanup");
 
     // Delete sort-based intermediates
+    #[allow(clippy::type_complexity)]
     let sort_cleanups: &[(&str, &dyn Fn(Vec<Term>) -> Term, &[&str])] = &[
         (
             "MReplace",
@@ -1022,7 +1038,7 @@ pub fn base_cleanup_egglog() -> String {
         ("RowMajor", &|a| rowmajor(a[0].clone()), &["x"]),
     ];
     for (name, ctor, vars) in sort_cleanups {
-        let args: Vec<Term> = vars.iter().map(|s| v(s)).collect();
+        let args: Vec<Term> = vars.iter().map(v).collect();
         let term = ctor(args);
         p.add_rule(
             Rule::new()
@@ -1034,6 +1050,7 @@ pub fn base_cleanup_egglog() -> String {
     }
 
     // Delete function-based intermediates
+    #[allow(clippy::type_complexity)]
     let fn_cleanups: &[(&str, fn(Vec<Term>) -> Term, usize)] = &[
         ("len", |a| len_f(a[0].clone()), 1),
         ("nth_from_end", |a| nth_f(a[0].clone(), a[1].clone()), 2),
@@ -1045,7 +1062,7 @@ pub fn base_cleanup_egglog() -> String {
             2 => vec!["?x", "?y"],
             _ => unreachable!(),
         };
-        let args: Vec<Term> = var_names.iter().map(|s| v(s)).collect();
+        let args: Vec<Term> = var_names.iter().map(v).collect();
         let term = ctor(args);
         p.add_rule(
             Rule::new()

@@ -145,6 +145,12 @@ pub struct Rule {
 /// Fresh variable name used internally by [`rewrite()`] desugaring.
 const RW_VAR: &str = "?__rw";
 
+impl Default for Rule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Rule {
     pub fn new() -> Self {
         Self {
@@ -251,10 +257,12 @@ impl Rule {
 
     /// Build a rule from a list of actions, automatically deriving facts.
     ///
-    /// For each `Union(lhs, rhs)` where `lhs` is an `App` term, this:
+    /// For each `Union(lhs, rhs)` where `lhs` is an `App` term, and for
+    /// each `Set(func_app, value)` where `func_app` contains nested `App`
+    /// patterns with variables, this:
     /// 1. Creates a fresh variable `?__rw0`, `?__rw1`, etc.
-    /// 2. Adds `(= ?__rwN lhs)` as a fact
-    /// 3. Replaces all occurrences of `lhs` in the action terms with `?__rwN`
+    /// 2. Adds `(= ?__rwN pattern)` as a fact
+    /// 3. Replaces all occurrences of the pattern in the action terms with `?__rwN`
     pub fn from_actions(actions: Vec<Action>) -> Self {
         let mut facts = Vec::new();
         let mut replacements: Vec<(Term, Term)> = Vec::new();
@@ -262,13 +270,28 @@ impl Rule {
 
         // Identify App patterns from Union LHS and bind to fresh variables
         for action in &actions {
-            if let Action::Union(lhs, _) = action {
-                if matches!(lhs, Term::App { .. }) {
-                    let fresh = v(format!("?__rw{}", var_counter));
-                    var_counter += 1;
-                    facts.push(eq(fresh.clone(), lhs.clone()));
-                    replacements.push((lhs.clone(), fresh));
+            match action {
+                Action::Union(lhs, _) => {
+                    if matches!(lhs, Term::App { .. }) {
+                        let fresh = v(format!("?__rw{}", var_counter));
+                        var_counter += 1;
+                        facts.push(eq(fresh.clone(), lhs.clone()));
+                        replacements.push((lhs.clone(), fresh));
+                    }
                 }
+                Action::Set(Term::App { args, .. }, _) => {
+                    // For Set actions like set(dtype(op_match), value),
+                    // extract nested App patterns within the function call's args
+                    for arg in args {
+                        if matches!(arg, Term::App { .. }) {
+                            let fresh = v(format!("?__rw{}", var_counter));
+                            var_counter += 1;
+                            facts.push(eq(fresh.clone(), arg.clone()));
+                            replacements.push((arg.clone(), fresh));
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -341,6 +364,12 @@ pub struct FunctionDef {
 #[derive(Clone, Debug)]
 pub struct Args {
     entries: Vec<(String, Term)>,
+}
+
+impl Default for Args {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Args {
@@ -494,7 +523,7 @@ impl SortDef {
         );
 
         let mut provided: HashMap<String, Term> = args
-            .into_iter()
+            .iter()
             .map(|(s, t)| (s.to_string(), t.clone()))
             .collect();
 
@@ -710,7 +739,13 @@ pub fn empty_rule() -> Rule {
 
 pub fn term_to_egglog(term: &Term) -> String {
     match term {
-        Term::Var(var) => var.name.to_string(),
+        Term::Var(var) => {
+            if var.name.starts_with('?') {
+                var.name.to_string()
+            } else {
+                format!("?{}", var.name)
+            }
+        }
         Term::App { variant, args } => {
             let mut out = String::new();
             out.push('(');
