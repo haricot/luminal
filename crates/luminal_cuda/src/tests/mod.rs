@@ -2,6 +2,7 @@ mod misc;
 mod mxfp4;
 mod nvfp4;
 mod ops;
+mod transformer;
 
 use cudarc::driver::CudaContext;
 use luminal::prelude::*;
@@ -13,6 +14,11 @@ use candle_core::{Device, Tensor};
 
 pub fn random_vec(n: usize) -> Vec<f32> {
     let mut rng = StdRng::seed_from_u64(0);
+    (0..n).map(|_| rng.random_range(-0.5..0.5)).collect()
+}
+
+pub fn random_vec_seeded(n: usize, seed: u64) -> Vec<f32> {
+    let mut rng = StdRng::seed_from_u64(seed);
     (0..n).map(|_| rng.random_range(-0.5..0.5)).collect()
 }
 

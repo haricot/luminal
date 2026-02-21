@@ -3,9 +3,10 @@ use luminal::egglog_utils::{
     egglog_to_llir, extract_generation, hash_choice_set, random_initial_choice, validate_choice_set,
 };
 use luminal::prelude::*;
+use rand::{Rng, SeedableRng, rngs::StdRng};
 use tracing::{Level, enabled};
 
-use super::{assert_close, get_cuda_stream, random_vec};
+use super::{assert_close, assert_close_precision, get_cuda_stream, random_vec};
 use crate::cuda_bandwidth_gbps;
 use crate::runtime::CudaRuntime;
 
@@ -328,4 +329,251 @@ fn fuzz_test_cuda_genomes() {
         tested
     );
     assert!(tested > 0, "No genomes were tested");
+}
+
+/// Helper to run genome fuzzing on an arbitrary graph with given inputs and expected output.
+/// Tests that multiple equivalent genomes from the e-graph search all produce the same correct result.
+fn fuzz_genomes_for_graph(
+    cx: &mut Graph,
+    inputs: &[(GraphTensor, Vec<f32>)],
+    out: GraphTensor,
+    expected: &[f32],
+    target_genomes: usize,
+) {
+    let Some(stream) = get_cuda_stream() else {
+        println!("CUDA not available, skipping");
+        return;
+    };
+
+    cx.build_search_space::<CudaRuntime>();
+    let egraph = cx.egraph().unwrap();
+    let ops = cx.egglog_ops().unwrap();
+
+    let mut rng = rand::rng();
+    let mut prev_selected: FxHashSet<u64> = FxHashSet::default();
+
+    let initial = random_initial_choice(egraph, &mut rng);
+    prev_selected.insert(hash_choice_set(&initial));
+
+    if let Err(e) = validate_choice_set(egraph, &initial, ops) {
+        panic!("Initial genome invalid: {}", e);
+    }
+
+    // Execute initial
+    let mut list_cache = FxHashMap::default();
+    let mut expr_cache = FxHashMap::default();
+    let llir_graph = egglog_to_llir(
+        egraph,
+        initial.clone(),
+        ops,
+        &cx.custom_ops,
+        &mut list_cache,
+        &mut expr_cache,
+        None,
+    );
+
+    let mut rt = CudaRuntime::initialize(stream.clone());
+    rt.load_llir(&llir_graph);
+    for (tensor, data) in inputs {
+        rt.set_data(*tensor, data.clone());
+    }
+    rt.execute(&cx.dyn_map);
+    let result = rt.get_f32(out);
+    assert_close_precision(&result, expected, 1e-2);
+
+    // Fuzz more genomes
+    let mut base = initial;
+    let mut tested = 0;
+
+    for _ in 0..200 {
+        let offspring = extract_generation(egraph, &base, 10, 2, &mut prev_selected, &mut rng);
+        if offspring.is_empty() {
+            break;
+        }
+        for genome in offspring {
+            if let Err(e) = validate_choice_set(egraph, &genome, ops) {
+                panic!("Invalid genome: {}", e);
+            }
+            let mut list_cache = FxHashMap::default();
+            let mut expr_cache = FxHashMap::default();
+            let llir_graph = egglog_to_llir(
+                egraph,
+                genome.clone(),
+                ops,
+                &cx.custom_ops,
+                &mut list_cache,
+                &mut expr_cache,
+                None,
+            );
+            let mut rt = CudaRuntime::initialize(stream.clone());
+            rt.load_llir(&llir_graph);
+            for (tensor, data) in inputs {
+                rt.set_data(*tensor, data.clone());
+            }
+            rt.execute(&cx.dyn_map);
+            let result = rt.get_f32(out);
+            assert_close_precision(&result, expected, 1e-2);
+            tested += 1;
+            base = genome;
+            if tested >= target_genomes {
+                break;
+            }
+        }
+        if tested >= target_genomes {
+            break;
+        }
+    }
+
+    println!("Genome fuzz: verified {} genomes", tested);
+    assert!(tested > 0, "No genomes were tested");
+}
+
+/// Fuzz test: softmax graph (matmul → add → softmax) across genomes
+#[test]
+fn fuzz_test_cuda_genomes_softmax() {
+    let mut cx = Graph::default();
+    let a = cx.tensor((4, 8));
+    let b = cx.tensor((8, 4));
+    let c = cx.tensor((4, 4));
+
+    let d = a.matmul(b);
+    let e = (d + c).softmax(1);
+    let out = e.output();
+
+    let a_data = random_vec(32);
+    let b_data = random_vec(32);
+    let c_data = random_vec(16);
+
+    // Candle reference
+    let device = candle_core::Device::Cpu;
+    let ref_a = candle_core::Tensor::from_vec(a_data.clone(), (4, 8), &device).unwrap();
+    let ref_b = candle_core::Tensor::from_vec(b_data.clone(), (8, 4), &device).unwrap();
+    let ref_c = candle_core::Tensor::from_vec(c_data.clone(), (4, 4), &device).unwrap();
+    let ref_d = ref_a.matmul(&ref_b).unwrap();
+    let ref_sum = (&ref_d + &ref_c).unwrap();
+    // Manual softmax
+    let max_val = ref_sum.max(1).unwrap();
+    let shifted = ref_sum.broadcast_sub(&max_val.unsqueeze(1).unwrap()).unwrap();
+    let exps = shifted.exp().unwrap();
+    let sum_exps = exps.sum(1).unwrap();
+    let ref_e = exps.broadcast_div(&sum_exps.unsqueeze(1).unwrap()).unwrap();
+    let expected: Vec<f32> = ref_e.flatten_all().unwrap().to_vec1().unwrap();
+
+    fuzz_genomes_for_graph(
+        &mut cx,
+        &[(a, a_data), (b, b_data), (c, c_data)],
+        out,
+        &expected,
+        30,
+    );
+}
+
+/// Fuzz test: reduction chain (sum + mean + max across different axes)
+#[test]
+fn fuzz_test_cuda_genomes_reductions() {
+    let mut cx = Graph::default();
+    let a = cx.tensor((4, 8));
+    let b = cx.tensor((4, 8));
+
+    // (a + b) → sum along axis 1, then relu
+    let c = (a + b).sum(1).relu();
+    let out = c.output();
+
+    let a_data = random_vec(32);
+    let b_data = random_vec(32);
+
+    let device = candle_core::Device::Cpu;
+    let ref_a = candle_core::Tensor::from_vec(a_data.clone(), (4, 8), &device).unwrap();
+    let ref_b = candle_core::Tensor::from_vec(b_data.clone(), (4, 8), &device).unwrap();
+    let ref_c = (&ref_a + &ref_b).unwrap().sum(1).unwrap().relu().unwrap();
+    let expected: Vec<f32> = ref_c.flatten_all().unwrap().to_vec1().unwrap();
+
+    fuzz_genomes_for_graph(
+        &mut cx,
+        &[(a, a_data), (b, b_data)],
+        out,
+        &expected,
+        30,
+    );
+}
+
+/// Fuzz test: chained matmuls (a @ b @ c) to test more complex operation fusion
+#[test]
+fn fuzz_test_cuda_genomes_chained_matmul() {
+    let mut cx = Graph::default();
+    let a = cx.tensor((4, 6));
+    let b = cx.tensor((6, 8));
+    let c = cx.tensor((8, 4));
+
+    let d = a.matmul(b).matmul(c).relu();
+    let out = d.output();
+
+    let a_data = random_vec(24);
+    let b_data = random_vec(48);
+    let c_data = random_vec(32);
+
+    let device = candle_core::Device::Cpu;
+    let ref_a = candle_core::Tensor::from_vec(a_data.clone(), (4, 6), &device).unwrap();
+    let ref_b = candle_core::Tensor::from_vec(b_data.clone(), (6, 8), &device).unwrap();
+    let ref_c = candle_core::Tensor::from_vec(c_data.clone(), (8, 4), &device).unwrap();
+    let ref_d = ref_a.matmul(&ref_b).unwrap().matmul(&ref_c).unwrap().relu().unwrap();
+    let expected: Vec<f32> = ref_d.flatten_all().unwrap().to_vec1().unwrap();
+
+    fuzz_genomes_for_graph(
+        &mut cx,
+        &[(a, a_data), (b, b_data), (c, c_data)],
+        out,
+        &expected,
+        30,
+    );
+}
+
+/// Fuzz test with multiple random data seeds to catch data-dependent bugs.
+/// Runs the matmul+relu genome fuzz with several different random inputs.
+#[test]
+fn fuzz_test_cuda_genomes_multi_seed() {
+    let Some(stream) = get_cuda_stream() else {
+        println!("CUDA not available, skipping");
+        return;
+    };
+
+    for seed in 0u64..5 {
+        let mut rng = StdRng::seed_from_u64(seed);
+
+        let mut cx = Graph::default();
+        let a = cx.tensor((4, 8));
+        let b = cx.tensor((8, 4));
+        let c = cx.tensor((4, 4));
+
+        let d = a.matmul(b);
+        let e = (d + c).relu();
+        let out = e.output();
+
+        cx.build_search_space::<CudaRuntime>();
+
+        let a_data: Vec<f32> = (0..32).map(|_| rng.random_range(-0.5..0.5)).collect();
+        let b_data: Vec<f32> = (0..32).map(|_| rng.random_range(-0.5..0.5)).collect();
+        let c_data: Vec<f32> = (0..16).map(|_| rng.random_range(-0.5..0.5)).collect();
+
+        // Reference
+        let device = candle_core::Device::Cpu;
+        let ref_a = candle_core::Tensor::from_vec(a_data.clone(), (4, 8), &device).unwrap();
+        let ref_b = candle_core::Tensor::from_vec(b_data.clone(), (8, 4), &device).unwrap();
+        let ref_c = candle_core::Tensor::from_vec(c_data.clone(), (4, 4), &device).unwrap();
+        let ref_d = ref_a.matmul(&ref_b).unwrap();
+        let ref_e = (&ref_d + &ref_c).unwrap().relu().unwrap();
+        let expected: Vec<f32> = ref_e.flatten_all().unwrap().to_vec1().unwrap();
+
+        // Run on CUDA via search
+        let mut rt = CudaRuntime::initialize(stream.clone());
+        rt.set_data(a, a_data);
+        rt.set_data(b, b_data);
+        rt.set_data(c, c_data);
+        rt = cx.search(rt, 5);
+        rt.execute(&cx.dyn_map);
+
+        let result = rt.get_f32(out);
+        assert_close(&result, &expected);
+        println!("Seed {}: correct", seed);
+    }
 }
