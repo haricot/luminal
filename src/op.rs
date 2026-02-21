@@ -290,7 +290,6 @@ impl<T: Debug + 'static> DialectOpTrait for DialectOp<T> {}
 
 pub trait DialectOpTrait: AsAny + Debug {}
 
-
 #[macro_export]
 macro_rules! __impl_tuple_into_dyn_arcbox_concat_arity {
     ($tr:ident; $($T:ident),+ $(,)?) => {

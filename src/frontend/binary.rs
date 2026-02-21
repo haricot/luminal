@@ -164,7 +164,11 @@ impl Add<f32> for GraphTensor {
     type Output = GraphTensor;
 
     fn add(self, rhs: f32) -> Self::Output {
-        self + self.graph().constant_float(rhs).cast(self.dtype).expand_rhs(self.shape)
+        self + self
+            .graph()
+            .constant_float(rhs)
+            .cast(self.dtype)
+            .expand_rhs(self.shape)
     }
 }
 
@@ -172,7 +176,11 @@ impl<S: Into<Expression>> Add<S> for GraphTensor {
     type Output = GraphTensor;
 
     fn add(self, rhs: S) -> Self::Output {
-        self + self.graph().constant(rhs).cast(self.dtype).expand_rhs(self.shape)
+        self + self
+            .graph()
+            .constant(rhs)
+            .cast(self.dtype)
+            .expand_rhs(self.shape)
     }
 }
 
@@ -180,7 +188,11 @@ impl Sub<f32> for GraphTensor {
     type Output = GraphTensor;
 
     fn sub(self, rhs: f32) -> Self::Output {
-        self - self.graph().constant_float(rhs).cast(self.dtype).expand_rhs(self.shape)
+        self - self
+            .graph()
+            .constant_float(rhs)
+            .cast(self.dtype)
+            .expand_rhs(self.shape)
     }
 }
 
@@ -188,7 +200,11 @@ impl<S: Into<Expression>> Sub<S> for GraphTensor {
     type Output = GraphTensor;
 
     fn sub(self, rhs: S) -> Self::Output {
-        self - self.graph().constant(rhs).cast(self.dtype).expand_rhs(self.shape)
+        self - self
+            .graph()
+            .constant(rhs)
+            .cast(self.dtype)
+            .expand_rhs(self.shape)
     }
 }
 
@@ -196,7 +212,11 @@ impl Mul<f32> for GraphTensor {
     type Output = GraphTensor;
 
     fn mul(self, rhs: f32) -> Self::Output {
-        self * self.graph().constant_float(rhs).cast(self.dtype).expand_rhs(self.shape)
+        self * self
+            .graph()
+            .constant_float(rhs)
+            .cast(self.dtype)
+            .expand_rhs(self.shape)
     }
 }
 
@@ -204,7 +224,11 @@ impl<S: Into<Expression>> Mul<S> for GraphTensor {
     type Output = GraphTensor;
 
     fn mul(self, rhs: S) -> Self::Output {
-        self * self.graph().constant(rhs).cast(self.dtype).expand_rhs(self.shape)
+        self * self
+            .graph()
+            .constant(rhs)
+            .cast(self.dtype)
+            .expand_rhs(self.shape)
     }
 }
 
@@ -237,7 +261,11 @@ impl Rem<f32> for GraphTensor {
     type Output = GraphTensor;
 
     fn rem(self, rhs: f32) -> Self::Output {
-        self % self.graph().constant_float(rhs).cast(self.dtype).expand_rhs(self.shape)
+        self % self
+            .graph()
+            .constant_float(rhs)
+            .cast(self.dtype)
+            .expand_rhs(self.shape)
     }
 }
 
@@ -245,7 +273,11 @@ impl<S: Into<Expression>> Rem<S> for GraphTensor {
     type Output = GraphTensor;
 
     fn rem(self, rhs: S) -> Self::Output {
-        self % self.graph().constant(rhs).cast(self.dtype).expand_rhs(self.shape)
+        self % self
+            .graph()
+            .constant(rhs)
+            .cast(self.dtype)
+            .expand_rhs(self.shape)
     }
 }
 

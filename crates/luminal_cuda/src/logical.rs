@@ -1,7 +1,10 @@
 use std::fmt::Debug;
 
 use luminal::{
-    egglog_utils::{api::{Rule, SortDef}, base::OP_SORTS},
+    egglog_utils::{
+        api::{Rule, SortDef},
+        base::OP_SORTS,
+    },
     op::EgglogOp,
 };
 
@@ -19,8 +22,8 @@ impl EgglogOp for Exp {
     }
 
     fn rewrites(&self) -> Vec<Rule> {
-        vec![
-            Rule::raw("(rule
+        vec![Rule::raw(
+            "(rule
             (
                 (= ?exp_const (Constant 1.442695))
                 (= ?mul (Mul ?shape ?x ?x_stride ?exp_const ?const_stride ?intermediate_stride))
@@ -32,8 +35,8 @@ impl EgglogOp for Exp {
                 (union ?exp2 ?exp)
                 (set (dtype ?exp) ?dt)
             )
-        )"),
-        ]
+        )",
+        )]
     }
 }
 

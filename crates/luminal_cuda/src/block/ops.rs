@@ -202,8 +202,8 @@ impl EgglogOp for RowSwishMul {
     }
 
     fn rewrites(&self) -> Vec<Rule> {
-        vec![
-            Rule::raw("(rule
+        vec![Rule::raw(
+            "(rule
             (
                 (= ?sigmoid (Sigmoid
                     (ECons ?batch (ECons ?width (ENil)))
@@ -244,8 +244,8 @@ impl EgglogOp for RowSwishMul {
                 (set (dtype ?rsm) (F32))
             )
             :name \"row swish mul\"
-        )"),
-        ]
+        )",
+        )]
     }
 
     fn cleanup(&self) -> bool {
@@ -384,8 +384,8 @@ impl EgglogOp for RowRMSNorm {
     }
 
     fn rewrites(&self) -> Vec<Rule> {
-        vec![
-            Rule::raw("(rule
+        vec![Rule::raw(
+            "(rule
             (
                 (= ?square (Mul ?inp_range ?x ?inp_stride ?x ?inp_stride ?square_stride))
                 (= ?width (nth_from_end ?inp_range 0))
@@ -472,8 +472,8 @@ impl EgglogOp for RowRMSNorm {
                 (set (dtype ?new) (F32))
             )
             :name \"row rms norm\"
-        )"),
-        ]
+        )",
+        )]
     }
 
     fn cleanup(&self) -> bool {
@@ -637,20 +637,20 @@ impl EgglogOp for RowRope {
     }
 
     fn rewrites(&self) -> Vec<Rule> {
-        vec![
-            Rule::raw("(rule
+        vec![Rule::raw(
+            "(rule
            (
                 (= ?e (RowRope ?shape ?inp ?stride ?row_width ?pos_ids))
                 (= (F32) (dtype ?inp))
             )
            ((set (dtype ?e) (F32)))
-        )"),
-        ]
+        )",
+        )]
     }
 
     fn early_rewrites(&self) -> Vec<Rule> {
-        vec![
-        Rule::raw(r#"
+        vec![Rule::raw(
+            r#"
             (rule
               (
                 ;; Bind the head-count and hidden-dim directly from the places they appear.
@@ -897,7 +897,8 @@ impl EgglogOp for RowRope {
               )
               :name "row rope"
             )
-        "#)]
+        "#,
+        )]
     }
 }
 
