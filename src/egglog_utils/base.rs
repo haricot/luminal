@@ -70,16 +70,16 @@ pub fn nelem_f(l: Term) -> Term {
 // ---- Expression term constructors ----
 
 pub fn num(val: Term) -> Term {
-    SORTS.m_num.call([("n", val)])
+    SORTS.m_num.call(("n", val))
 }
 pub fn float(val: Term) -> Term {
-    SORTS.m_float.call([("n", val)])
+    SORTS.m_float.call(("n", val))
 }
 pub fn iter() -> Term {
-    SORTS.m_iter.call([])
+    SORTS.m_iter.call(())
 }
 pub fn mvar(name: Term) -> Term {
-    SORTS.m_var.call([("name", name)])
+    SORTS.m_var.call(("name", name))
 }
 pub fn add(a: Term, b: Term) -> Term {
     SORTS.m_add.call([("a", a), ("b", b)])
@@ -130,7 +130,7 @@ pub fn cons(head: Term, tail: Term) -> Term {
     SORTS.e_cons.call([("head", head), ("tail", tail)])
 }
 pub fn nil() -> Term {
-    SORTS.e_nil.call([])
+    SORTS.e_nil.call(())
 }
 pub fn replace_list(list: Term, from: Term, to: Term) -> Term {
     SORTS
@@ -148,7 +148,7 @@ pub fn remove_nth(list: Term, ind: Term) -> Term {
         .call([("list", list), ("ind", ind)])
 }
 pub fn rowmajor(list: Term) -> Term {
-    SORTS.row_major.call([("list", list)])
+    SORTS.row_major.call(("list", list))
 }
 
 // ---- Conversions from shape types to egglog terms ----
@@ -365,16 +365,15 @@ impl BaseSorts {
 }
 
 /// Convenience accessors for common op sort patterns.
-pub struct OpSorts {
-    /// The `(function dtype (IR) DType)` function.
-    pub f_dtype: SortDef,
+pub struct OpSorts;
+
+pub fn dtype(e: Term) -> Term {
+    app(&func("dtype", &["inp"]), vec![e])
 }
 
 impl OpSorts {
     pub fn new() -> Self {
-        Self {
-            f_dtype: func("dtype", &["inp"]),
-        }
+        Self
     }
 
     /// Unary op: (shape: EList, inp: IR, strides: EList, out_strides: EList)
@@ -451,7 +450,7 @@ pub fn base_expression_egglog() -> String {
 
     // Constant folding: add
     p.add_rule(
-        rule()
+        Rule::new()
             .facts(vec![
                 peq(v("?e"), add(num(v("a")), num(v("b")))),
                 peq(v("?ans"), padd(v("a"), v("b"))),
@@ -475,14 +474,14 @@ pub fn base_expression_egglog() -> String {
 
     // Constant folding: mul
     p.add_rule(
-        rule()
+        Rule::new()
             .facts(vec![
                 peq(v("?e"), mul(num(v("?a")), num(v("?b")))),
                 peq(v("?prod"), pmul(v("?a"), v("?b"))),
             ])
             .actions(vec![
-                Action::Union(v("?e"), num(v("?prod"))),
-                Action::Subsume(mul(num(v("?a")), num(v("?b")))),
+                union(v("?e"), num(v("?prod"))),
+                subsume(mul(num(v("?a")), num(v("?b")))),
             ])
             .ruleset("expr"),
     );
@@ -548,18 +547,16 @@ pub fn base_expression_egglog() -> String {
     // Identity/zero rules
     p.add_rule(rewrite("add-zero", add(v("a"), num(i64(0))), v("a")).ruleset("expr"));
     p.add_rule(
-        rule()
+        Rule::new()
             .fact(peq(v("?e"), mul(v("?a"), num(i64(1)))))
-            .action(Action::Union(v("?e"), v("?a")))
+            .union(v("?e"), v("?a"))
             .ruleset("expr"),
     );
     p.add_rule(
-        rule()
+        Rule::new()
             .fact(peq(v("?e"), mul(v("?a"), num(i64(0)))))
-            .actions(vec![
-                Action::Union(v("?e"), num(i64(0))),
-                Action::Subsume(mul(v("?a"), num(i64(0)))),
-            ])
+            .union(v("?e"), num(i64(0)))
+            .subsume(mul(v("?a"), num(i64(0))))
             .ruleset("expr"),
     );
     p.add_rule(rewrite("div-one", div(v("a"), num(i64(1))), v("a")).ruleset("expr"));
@@ -662,15 +659,13 @@ pub fn base_expression_egglog() -> String {
 
     // Constant folding through associativity
     p.add_rule(
-        rule()
+        Rule::new()
             .facts(vec![
                 peq(v("?e"), add(add(v("?a"), num(v("?b"))), num(v("?c")))),
                 peq(v("?ans"), padd(v("?b"), v("?c"))),
             ])
-            .actions(vec![
-                Action::Union(v("?e"), add(v("?a"), num(v("?ans")))),
-                Action::Subsume(add(add(v("?a"), num(v("?b"))), num(v("?c")))),
-            ])
+            .union(v("?e"), add(v("?a"), num(v("?ans"))))
+            .subsume(add(add(v("?a"), num(v("?b"))), num(v("?c"))))
             .ruleset("expr"),
     );
     p.add_rule(
@@ -697,7 +692,7 @@ pub fn base_expression_egglog() -> String {
             add(mul(num(v("?n")), v("?a")), v("?a")),
             mul(num(padd(v("?n"), i64(1))), v("?a")),
         )
-        .action(Action::Subsume(add(mul(num(v("?n")), v("?a")), v("?a"))))
+        .subsume(add(mul(num(v("?n")), v("?a")), v("?a")))
         .ruleset("expr"),
     );
     p.add_rule(
@@ -706,7 +701,7 @@ pub fn base_expression_egglog() -> String {
             add(v("?a"), mul(num(v("?n")), v("?a"))),
             mul(num(padd(v("?n"), i64(1))), v("?a")),
         )
-        .action(Action::Subsume(add(v("?a"), mul(num(v("?n")), v("?a")))))
+        .subsume(add(v("?a"), mul(num(v("?n")), v("?a"))))
         .ruleset("expr"),
     );
     p.add_rule(
@@ -715,7 +710,7 @@ pub fn base_expression_egglog() -> String {
             add(mul(v("?a"), num(v("?n"))), v("?a")),
             mul(num(padd(v("?n"), i64(1))), v("?a")),
         )
-        .action(Action::Subsume(add(mul(v("?a"), num(v("?n"))), v("?a"))))
+        .subsume(add(mul(v("?a"), num(v("?n"))), v("?a")))
         .ruleset("expr"),
     );
     p.add_rule(
@@ -724,7 +719,7 @@ pub fn base_expression_egglog() -> String {
             add(v("?a"), mul(v("?a"), num(v("?n")))),
             mul(num(padd(v("?n"), i64(1))), v("?a")),
         )
-        .action(Action::Subsume(add(v("?a"), mul(v("?a"), num(v("?n"))))))
+        .subsume(add(v("?a"), mul(v("?a"), num(v("?n")))))
         .ruleset("expr"),
     );
 
@@ -735,10 +730,7 @@ pub fn base_expression_egglog() -> String {
             add(add(v("?a"), mvar(v("?v"))), mvar(v("?v"))),
             add(v("?a"), mul(num(i64(2)), mvar(v("?v")))),
         )
-        .action(Action::Subsume(add(
-            add(v("?a"), mvar(v("?v"))),
-            mvar(v("?v")),
-        )))
+        .subsume(add(add(v("?a"), mvar(v("?v"))), mvar(v("?v"))))
         .ruleset("expr"),
     );
     p.add_rule(
@@ -747,10 +739,7 @@ pub fn base_expression_egglog() -> String {
             add(add(mvar(v("?v")), v("?a")), mvar(v("?v"))),
             add(v("?a"), mul(num(i64(2)), mvar(v("?v")))),
         )
-        .action(Action::Subsume(add(
-            add(mvar(v("?v")), v("?a")),
-            mvar(v("?v")),
-        )))
+        .subsume(add(add(mvar(v("?v")), v("?a")), mvar(v("?v"))))
         .ruleset("expr"),
     );
 
@@ -761,10 +750,7 @@ pub fn base_expression_egglog() -> String {
             add(add(mul(num(v("?n")), v("?a")), v("?b")), v("?a")),
             add(mul(num(padd(v("?n"), i64(1))), v("?a")), v("?b")),
         )
-        .action(Action::Subsume(add(
-            add(mul(num(v("?n")), v("?a")), v("?b")),
-            v("?a"),
-        )))
+        .subsume(add(add(mul(num(v("?n")), v("?a")), v("?b")), v("?a")))
         .ruleset("expr"),
     );
     p.add_rule(
@@ -773,10 +759,7 @@ pub fn base_expression_egglog() -> String {
             add(add(v("?b"), mul(num(v("?n")), v("?a"))), v("?a")),
             add(v("?b"), mul(num(padd(v("?n"), i64(1))), v("?a"))),
         )
-        .action(Action::Subsume(add(
-            add(v("?b"), mul(num(v("?n")), v("?a"))),
-            v("?a"),
-        )))
+        .subsume(add(add(v("?b"), mul(num(v("?n")), v("?a"))), v("?a")))
         .ruleset("expr"),
     );
 
@@ -848,13 +831,13 @@ pub fn base_expression_egglog() -> String {
         merge: Some("new".into()),
     });
     p.add_rule(
-        rule()
+        Rule::new()
             .fact(peq(v("?e"), nil()))
             .action(Action::Set(len_f(v("?e")), i64(0)))
             .ruleset("expr"),
     );
     p.add_rule(
-        rule()
+        Rule::new()
             .facts(vec![
                 peq(v("?e"), cons(v("?expr"), v("?list"))),
                 peq(v("?prev_len"), len_f(v("?list"))),
@@ -870,7 +853,7 @@ pub fn base_expression_egglog() -> String {
         merge: Some("new".into()),
     });
     p.add_rule(
-        rule()
+        Rule::new()
             .facts(vec![
                 peq(v("?e"), cons(v("?expr"), v("?list"))),
                 peq(v("?list_len"), len_f(v("?list"))),
@@ -879,7 +862,7 @@ pub fn base_expression_egglog() -> String {
             .ruleset("expr"),
     );
     p.add_rule(
-        rule()
+        Rule::new()
             .facts(vec![
                 peq(v("?e"), cons(v("?expr"), v("?list"))),
                 peq(v("?other_nth"), nth_f(v("?list"), v("?n"))),
@@ -895,13 +878,13 @@ pub fn base_expression_egglog() -> String {
         merge: Some("new".into()),
     });
     p.add_rule(
-        rule()
+        Rule::new()
             .fact(peq(v("?e"), nil()))
             .action(Action::Set(nelem_f(v("?e")), num(i64(1))))
             .ruleset("expr"),
     );
     p.add_rule(
-        rule()
+        Rule::new()
             .facts(vec![
                 peq(v("?e"), cons(v("?dim"), v("?other"))),
                 peq(v("?other_elems"), nelem_f(v("?other"))),
@@ -915,7 +898,7 @@ pub fn base_expression_egglog() -> String {
 
     // RowMajor rules
     p.add_rule(
-        rule()
+        Rule::new()
             .facts(vec![
                 peq(v("?other"), cons(v("?other_dim"), v("?other_other"))),
                 peq(v("?list"), cons(v("?d"), v("?other"))),
@@ -952,7 +935,7 @@ pub fn base_expression_egglog() -> String {
 
     // ReplaceNthFromEnd: match case (ind == len list)
     p.add_rule(
-        rule()
+        Rule::new()
             .facts(vec![
                 peq(
                     v("?e"),
@@ -965,7 +948,7 @@ pub fn base_expression_egglog() -> String {
     );
     // ReplaceNthFromEnd: recurse case (ind < len list)
     p.add_rule(
-        rule()
+        Rule::new()
             .facts(vec![
                 peq(
                     v("?e"),
@@ -982,7 +965,7 @@ pub fn base_expression_egglog() -> String {
 
     // RemoveNthFromEnd: match case (ind == len list)
     p.add_rule(
-        rule()
+        Rule::new()
             .facts(vec![
                 peq(v("?e"), remove_nth(cons(v("?expr"), v("?list")), v("?ind"))),
                 peq(v("?ind"), len_f(v("?list"))),
@@ -992,7 +975,7 @@ pub fn base_expression_egglog() -> String {
     );
     // RemoveNthFromEnd: recurse case (ind < len list)
     p.add_rule(
-        rule()
+        Rule::new()
             .facts(vec![
                 peq(v("?e"), remove_nth(cons(v("?expr"), v("?list")), v("?ind"))),
                 plt(v("?ind"), len_f(v("?list"))),
@@ -1042,7 +1025,7 @@ pub fn base_cleanup_egglog() -> String {
         let args: Vec<Term> = vars.iter().map(|s| v(s)).collect();
         let term = ctor(args);
         p.add_rule(
-            rule()
+            Rule::new()
                 .fact(peq(v("?m"), term.clone()))
                 .action(Action::Delete(term))
                 .ruleset("base_cleanup"),
@@ -1065,7 +1048,7 @@ pub fn base_cleanup_egglog() -> String {
         let args: Vec<Term> = var_names.iter().map(|s| v(s)).collect();
         let term = ctor(args);
         p.add_rule(
-            rule()
+            Rule::new()
                 .fact(peq(v("?m"), term.clone()))
                 .action(Action::Delete(term))
                 .ruleset("base_cleanup"),

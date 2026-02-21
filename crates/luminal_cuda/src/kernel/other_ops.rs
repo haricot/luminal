@@ -8,7 +8,7 @@ use cudarc::{
 use itertools::Itertools;
 use luminal::{
     egglog_utils::{
-        api::{SortDef, sort},
+        api::{Rule, SortDef, sort},
         base::{DTYPE, ELIST, EXPRESSION, IR},
         extract_dtype, extract_expr, extract_expr_list,
     },
@@ -45,8 +45,8 @@ impl EgglogOp for KernelMeanReduce {
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
-        vec!["
+    fn rewrites(&self) -> Vec<Rule> {
+        vec![Rule::raw("
 (rule
     (
         (= ?sum (Sum ?out_shape ?iters ?inp ?in_stride ?iter_stride ?sum_out_stride))
@@ -61,7 +61,7 @@ impl EgglogOp for KernelMeanReduce {
     )
     :name \"kernel mean reduce\"
 )
-".to_string()]
+")]
     }
 
     fn cleanup(&self) -> bool {

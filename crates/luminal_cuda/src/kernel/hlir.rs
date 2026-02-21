@@ -8,8 +8,8 @@ use cudarc::{
 use itertools::Itertools;
 use luminal::{
     egglog_utils::{
-        api::{SortDef, Term, app, eq, rule, sort, v},
-        base::{DTYPE, ELIST, EXPRESSION, F64, IR, OP_SORTS, SORTS},
+        api::{Rule, SortDef, app, rule, set, sort, union, v},
+        base::{DTYPE, ELIST, EXPRESSION, F64, IR, OP_SORTS, SORTS, dtype},
         extract_dtype, extract_expr, extract_expr_list,
     },
     hlir::{Add, Exp2, LessThan, Log2, MaxReduce, Mod, Mul, Recip, Sin, Sqrt, SumReduce},
@@ -35,27 +35,14 @@ pub type Ops = (
     KernelCast,
 );
 
-fn dtype_term(e: Term) -> Term {
-    app(&OP_SORTS.f_dtype, vec![e])
-}
-
 /// Build a rewrite that matches an HLIR op, reads dtype(s) from the given source fields,
 /// and unions with a kernel op that has the same fields plus the dtype(s) appended.
-fn kernel_rewrite<H: Default + EgglogOp, L: Default + EgglogOp>() -> String {
+fn kernel_rewrite<H: Default + EgglogOp, L: Default + EgglogOp>() -> Rule {
     let hlir = H::default().sort();
     let llir = L::default().sort();
-    let hlir_vars: Vec<Term> = hlir
-        .fields
-        .iter()
-        .map(|f| v(&format!("?{}", f.name)))
-        .collect();
-    let mut args = hlir_vars.clone();
-    args.push(v("?dtype"));
-    rule()
-        .fact(eq(v("?a"), app(&hlir, hlir_vars)))
-        .fact(eq(v("?dtype"), dtype_term(v("?a"))))
-        .union(v("?a"), app(&llir, args))
-        .to_egglog_string()
+    let (mut args, hlir_match) = hlir.new_call();
+    args.add("dtype", dtype(hlir_match.clone()));
+    rule(union(hlir_match, llir.call(&args)))
 }
 
 #[derive(Default, Debug, Clone)]
@@ -85,7 +72,7 @@ impl EgglogOp for KernelMaxReduce {
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![kernel_rewrite::<MaxReduce, Self>()]
     }
 
@@ -273,7 +260,7 @@ impl EgglogOp for KernelSumReduce {
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![kernel_rewrite::<SumReduce, Self>()]
     }
 
@@ -429,7 +416,7 @@ impl EgglogOp for KernelAdd {
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![kernel_rewrite::<Add, Self>()]
     }
 
@@ -569,7 +556,7 @@ impl EgglogOp for KernelMul {
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![kernel_rewrite::<Mul, Self>()]
     }
 
@@ -709,56 +696,16 @@ impl EgglogOp for KernelGather {
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
-        let gather = sort(
-            IR,
-            "Gather",
-            &[
-                ("indexes", IR),
-                ("index_shape", ELIST),
-                ("index_strides", ELIST),
-                ("data", IR),
-                ("data_shape", ELIST),
-                ("data_strides", ELIST),
-            ],
+    fn rewrites(&self) -> Vec<Rule> {
+        let (mut gather_args, gather_match) = luminal::hlir::Gather::default().sort().new_call();
+        gather_args.add("dtype", dtype(gather_args["data"].clone()));
+        gather_args.add(
+            "out_strides",
+            SORTS
+                .row_major
+                .call(("list".to_string(), gather_args["index_shape"].clone())),
         );
-        vec![
-            rule()
-                .facts(vec![
-                    eq(
-                        v("?a"),
-                        app(
-                            &gather,
-                            vec![
-                                v("?indexes"),
-                                v("?index_shape"),
-                                v("?index_strides"),
-                                v("?data"),
-                                v("?data_shape"),
-                                v("?data_strides"),
-                            ],
-                        ),
-                    ),
-                    eq(v("?dty"), dtype_term(v("?data"))),
-                ])
-                .union(
-                    v("?a"),
-                    app(
-                        &self.sort(),
-                        vec![
-                            v("?index_shape"),
-                            v("?indexes"),
-                            v("?index_strides"),
-                            v("?data"),
-                            v("?data_shape"),
-                            v("?data_strides"),
-                            app(&SORTS.row_major, vec![v("?index_shape")]),
-                            v("?dty"),
-                        ],
-                    ),
-                )
-                .to_egglog_string(),
-        ]
+        vec![rule(union(gather_match, self.sort().call(&gather_args)))]
     }
 
     fn cleanup(&self) -> bool {
@@ -889,16 +836,13 @@ impl EgglogOp for KernelIota {
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
-        let iota = sort(IR, "Iota", &[("expr", EXPRESSION), ("range", EXPRESSION)]);
-        let kernel_iota = app(&self.sort(), vec![v("?expr"), v("?range")]);
-        vec![
-            rule()
-                .fact(eq(v("?a"), app(&iota, vec![v("?expr"), v("?range")])))
-                .union(v("?a"), kernel_iota.clone())
-                .set(dtype_term(kernel_iota), app(&SORTS.int_dt, vec![]))
-                .to_egglog_string(),
-        ]
+    fn rewrites(&self) -> Vec<Rule> {
+        let (args, hlir_iota) = luminal::hlir::Iota::default().sort().new_call();
+        let kernel_iota = self.sort().call(&args);
+        vec![rule([
+            union(hlir_iota, kernel_iota.clone()),
+            set(dtype(kernel_iota), app(&SORTS.int_dt, vec![])),
+        ])]
     }
 
     fn cleanup(&self) -> bool {
@@ -1022,7 +966,7 @@ impl EgglogOp for KernelExp2 {
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![kernel_rewrite::<Exp2, Self>()]
     }
 
@@ -1155,7 +1099,7 @@ impl EgglogOp for KernelLog2 {
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![kernel_rewrite::<Log2, Self>()]
     }
 
@@ -1288,7 +1232,7 @@ impl EgglogOp for KernelSin {
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![kernel_rewrite::<Sin, Self>()]
     }
 
@@ -1421,7 +1365,7 @@ impl EgglogOp for KernelRecip {
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![kernel_rewrite::<Recip, Self>()]
     }
 
@@ -1554,7 +1498,7 @@ impl EgglogOp for KernelSqrt {
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![kernel_rewrite::<Sqrt, Self>()]
     }
 
@@ -1664,10 +1608,6 @@ extern \"C\" {{
     }
 }
 
-// =============================================================================
-// Binary Operations: Mod, LessThan
-// =============================================================================
-
 #[derive(Default, Debug, Clone)]
 pub struct KernelMod {
     out_shape: Vec<Expression>,
@@ -1694,7 +1634,7 @@ impl EgglogOp for KernelMod {
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![kernel_rewrite::<Mod, Self>()]
     }
 
@@ -1832,7 +1772,7 @@ impl EgglogOp for KernelLessThan {
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![kernel_rewrite::<LessThan, Self>()]
     }
 
@@ -1944,10 +1884,6 @@ extern \"C\" {{
     }
 }
 
-// =============================================================================
-// Special Operations: Constant, Cast
-// =============================================================================
-
 #[derive(Default, Debug, Clone)]
 pub struct KernelConstant {
     value: f32,
@@ -1958,15 +1894,12 @@ impl EgglogOp for KernelConstant {
         sort(IR, "KernelConstant", &[("value", F64)])
     }
 
-    fn rewrites(&self) -> Vec<String> {
-        let constant = sort(IR, "Constant", &[("value", F64)]);
-        let kernel_const = app(&self.sort(), vec![v("?value")]);
+    fn rewrites(&self) -> Vec<Rule> {
+        let (args, const_match) = luminal::hlir::Constant::default().sort().new_call();
+        let kernel_const = self.sort().call(&args);
         vec![
-            rule()
-                .fact(eq(v("?a"), app(&constant, vec![v("?value")])))
-                .union(v("?a"), kernel_const.clone())
-                .set(dtype_term(kernel_const), app(&SORTS.f32_dt, vec![]))
-                .to_egglog_string(),
+            rule(union(const_match, kernel_const.clone()))
+                .set(dtype(kernel_const), app(&SORTS.f32_dt, vec![])),
         ]
     }
 
@@ -2079,30 +2012,13 @@ impl EgglogOp for KernelCast {
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
-        let cast = sort(
-            IR,
-            "Cast",
-            &[("inp", IR), ("size", EXPRESSION), ("dtype", DTYPE)],
-        );
-        vec![
-            rule()
-                .facts(vec![
-                    eq(
-                        v("?a"),
-                        app(&cast, vec![v("?inp"), v("?size"), v("?out_dty")]),
-                    ),
-                    eq(v("?in_dty"), dtype_term(v("?inp"))),
-                ])
-                .union(
-                    v("?a"),
-                    app(
-                        &self.sort(),
-                        vec![v("?inp"), v("?size"), v("?in_dty"), v("?out_dty")],
-                    ),
-                )
-                .to_egglog_string(),
-        ]
+    fn rewrites(&self) -> Vec<Rule> {
+        let (mut args, cast_match) = luminal::hlir::Cast::default().sort().new_call();
+        let out_dty = args.remove("dtype");
+        let in_dty = dtype(args["inp"].clone());
+        args.add("dtype", in_dty);
+        args.add("src_dtype", out_dty);
+        vec![rule(union(cast_match, self.sort().call(&args)))]
     }
 
     fn cleanup(&self) -> bool {

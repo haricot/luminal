@@ -86,7 +86,7 @@ pub fn early_egglog(
     [
         base::base_expression_egglog(),
         op_defs_string(ops),
-        ops.iter().flat_map(|o| o.early_rewrites()).join("\n"),
+        ops.iter().flat_map(|o| o.early_rewrites()).map(|r| r.to_egglog_string()).join("\n"),
         if cleanup {
             op_cleanups_string(ops)
         } else {
@@ -110,7 +110,7 @@ pub fn full_egglog(program: &str, ops: &[Arc<Box<dyn EgglogOp>>], cleanup: bool)
     [
         base::base_expression_egglog(),
         op_defs_string(ops),
-        ops.iter().flat_map(|o| o.rewrites()).join("\n"),
+        ops.iter().flat_map(|o| o.rewrites()).map(|r| r.to_egglog_string()).join("\n"),
         if cleanup {
             op_cleanups_string(ops)
         } else {

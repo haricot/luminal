@@ -5,7 +5,7 @@ use cudarc::cublas::{
 use cudarc::driver::{CudaStream, DevicePtr};
 use luminal::{
     egglog_utils::{
-        api::{SortDef, sort},
+        api::{Rule, SortDef, sort},
         base::{EXPRESSION, IR, STRING},
         extract_expr,
     },
@@ -84,12 +84,12 @@ impl EgglogOp for CuBlasSgemmV2 {
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![
-            include_str!["sgemm_v2_RmRm_rewrite.egg"].to_string(), // row row
-            include_str!["sgemm_v2_RmCm_rewrite.egg"].to_string(), // row col
-            include_str!["sgemm_v2_CmRm_rewrite.egg"].to_string(), // col row
-            include_str!["sgemm_v2_CmCm_rewrite.egg"].to_string(), // col col
+            Rule::raw(include_str!["sgemm_v2_RmRm_rewrite.egg"]), // row row
+            Rule::raw(include_str!["sgemm_v2_RmCm_rewrite.egg"]), // row col
+            Rule::raw(include_str!["sgemm_v2_CmRm_rewrite.egg"]), // col row
+            Rule::raw(include_str!["sgemm_v2_CmCm_rewrite.egg"]), // col col
         ]
     }
 

@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 
 use luminal::{
-    egglog_utils::{api::SortDef, base::OP_SORTS},
+    egglog_utils::{api::{Rule, SortDef}, base::OP_SORTS},
     op::EgglogOp,
 };
 
@@ -18,9 +18,9 @@ impl EgglogOp for Exp {
         true
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![
-            "(rule
+            Rule::raw("(rule
             (
                 (= ?exp_const (Constant 1.442695))
                 (= ?mul (Mul ?shape ?x ?x_stride ?exp_const ?const_stride ?intermediate_stride))
@@ -32,8 +32,7 @@ impl EgglogOp for Exp {
                 (union ?exp2 ?exp)
                 (set (dtype ?exp) ?dt)
             )
-        )"
-            .to_string(),
+        )"),
         ]
     }
 }
@@ -49,8 +48,8 @@ impl EgglogOp for Sigmoid {
         true
     }
 
-    fn rewrites(&self) -> Vec<String> {
-        vec!["(rule
+    fn rewrites(&self) -> Vec<Rule> {
+        vec![Rule::raw("(rule
             (
                 (= ?neg_input (Mul ?input_range ?input ?input_stride (Constant -1.0) ?const_stride ?intermediate_stride))
                 (= ?exp (Exp ?input_range ?neg_input ?intermediate_stride ?exp_stride))
@@ -64,6 +63,6 @@ impl EgglogOp for Sigmoid {
                 (set (dtype ?sig) ?dt)
             )
             :name \"sigmoid\"
-        )".to_string()]
+        )")]
     }
 }

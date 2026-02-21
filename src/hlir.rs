@@ -1,65 +1,43 @@
 use std::fmt::Display;
 use std::{fmt::Debug, sync::Arc};
 
-use crate::egglog_utils::api::{SortDef, Term, app, eq, rule, sort, v};
-use crate::egglog_utils::base::*;
-use crate::egglog_utils::elist_to_egglog;
-use crate::egglog_utils::extract_dtype;
-use crate::egglog_utils::extract_expr;
-use crate::egglog_utils::extract_expr_list;
-use crate::egglog_utils::list_to_egglog;
+use crate::egglog_utils::{
+    api::{Rule, SortDef, sort},
+    base::*,
+    *,
+};
 use crate::op::*;
 use crate::prelude::*;
 
 use as_any::AsAny;
 use itertools::Itertools;
 
-/// Helper: build the `(dtype <expr>)` function application term.
-fn dtype_term(e: Term) -> Term {
-    app(&OP_SORTS.f_dtype, vec![e])
-}
-
 /// Helper: build a dtype propagation rule for an op.
 /// Matches the op, reads dtype from the named source field, and sets it on the op.
-fn dtype_propagation_rule(sort: &SortDef, dtype_source: &str) -> String {
-    let field_vars: Vec<Term> = sort
-        .fields
-        .iter()
-        .map(|f| v(&format!("?{}", f.name)))
-        .collect();
-    rule()
-        .facts(vec![
-            eq(v("?e"), app(sort, field_vars)),
-            eq(v("?dty"), dtype_term(v(&format!("?{dtype_source}")))),
-        ])
-        .set(dtype_term(v("?e")), v("?dty"))
-        .to_egglog_string()
+fn dtype_propagation_rule(sort: &SortDef, dtype_source: &str) -> Rule {
+    let (args, op_match) = sort.new_call();
+    crate::egglog_utils::api::rule(crate::egglog_utils::api::set(
+        dtype(op_match.clone()),
+        dtype(args[dtype_source].clone()),
+    ))
 }
 
 /// Helper: build a dtype-from-field rule (dtype comes directly from a field variable).
-fn dtype_from_field_rule(sort: &SortDef, dtype_field: &str) -> String {
-    let field_vars: Vec<Term> = sort
-        .fields
-        .iter()
-        .map(|f| v(&format!("?{}", f.name)))
-        .collect();
-    rule()
-        .fact(eq(v("?e"), app(sort, field_vars)))
-        .set(dtype_term(v("?e")), v(&format!("?{dtype_field}")))
-        .to_egglog_string()
+fn dtype_from_field_rule(sort: &SortDef, dtype_field: &str) -> Rule {
+    let (args, op_match) = sort.new_call();
+    crate::egglog_utils::api::rule(crate::egglog_utils::api::set(
+        dtype(op_match.clone()),
+        args[dtype_field].clone(),
+    ))
 }
 
 /// Helper: build a rule that sets a fixed dtype on an op.
-fn dtype_fixed_rule(sort: &SortDef, dtype_sort: &SortDef) -> String {
-    let field_vars: Vec<Term> = sort
-        .fields
-        .iter()
-        .map(|f| v(&format!("?{}", f.name)))
-        .collect();
-    rule()
-        .fact(eq(v("?e"), app(sort, field_vars)))
-        .set(dtype_term(v("?e")), app(dtype_sort, vec![]))
-        .to_egglog_string()
+fn dtype_fixed_rule(sort: &SortDef, dtype_sort: &SortDef) -> Rule {
+    let (_, op_match) = sort.new_call();
+    crate::egglog_utils::api::rule(crate::egglog_utils::api::set(
+        dtype(op_match),
+        dtype_sort.call(()),
+    ))
 }
 use num_traits::Float;
 use petgraph::{Direction, algo::toposort, prelude::StableGraph, visit::EdgeRef};
@@ -122,7 +100,7 @@ impl EgglogOp for Input {
         false
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![dtype_from_field_rule(&self.sort(), "dtype")]
     }
 
@@ -185,7 +163,7 @@ impl EgglogOp for Output {
         false
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![dtype_propagation_rule(&self.sort(), "inp")]
     }
 
@@ -242,7 +220,7 @@ impl EgglogOp for CustomOpHLIR {
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![dtype_from_field_rule(&self.sort(), "dtype")]
     }
 
@@ -297,7 +275,7 @@ impl EgglogOp for Constant {
         true
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![dtype_fixed_rule(&self.sort(), &SORTS.f32_dt)]
     }
     fn extract<'a>(
@@ -347,7 +325,7 @@ impl EgglogOp for Iota {
         true
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![dtype_fixed_rule(&self.sort(), &SORTS.int_dt)]
     }
     fn extract<'a>(
@@ -402,7 +380,7 @@ impl EgglogOp for Cast {
         true
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![dtype_from_field_rule(&self.sort(), "dtype")]
     }
     fn extract<'a>(
@@ -538,7 +516,7 @@ impl EgglogOp for Log2 {
     fn cleanup(&self) -> bool {
         true
     }
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![dtype_propagation_rule(&self.sort(), "inp")]
     }
     fn extract<'a>(
@@ -599,7 +577,7 @@ impl EgglogOp for Exp2 {
     fn cleanup(&self) -> bool {
         true
     }
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![dtype_propagation_rule(&self.sort(), "inp")]
     }
     fn extract<'a>(
@@ -661,7 +639,7 @@ impl EgglogOp for Sin {
     fn cleanup(&self) -> bool {
         true
     }
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![dtype_propagation_rule(&self.sort(), "inp")]
     }
     fn extract<'a>(
@@ -723,7 +701,7 @@ impl EgglogOp for Recip {
     fn cleanup(&self) -> bool {
         true
     }
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![dtype_propagation_rule(&self.sort(), "inp")]
     }
     fn extract<'a>(
@@ -785,7 +763,7 @@ impl EgglogOp for Sqrt {
     fn cleanup(&self) -> bool {
         true
     }
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![dtype_propagation_rule(&self.sort(), "inp")]
     }
     fn extract<'a>(
@@ -866,7 +844,7 @@ impl EgglogOp for Add {
     fn cleanup(&self) -> bool {
         true
     }
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![dtype_propagation_rule(&self.sort(), "inp_a")]
     }
     fn extract<'a>(
@@ -944,7 +922,7 @@ impl EgglogOp for Mul {
     fn cleanup(&self) -> bool {
         true
     }
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![dtype_propagation_rule(&self.sort(), "inp_a")]
     }
     fn extract<'a>(
@@ -1022,7 +1000,7 @@ impl EgglogOp for Mod {
     fn cleanup(&self) -> bool {
         true
     }
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![dtype_propagation_rule(&self.sort(), "inp_a")]
     }
     fn extract<'a>(
@@ -1100,7 +1078,7 @@ impl EgglogOp for LessThan {
     fn cleanup(&self) -> bool {
         true
     }
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         // Comparison operations always output Bool
         vec![dtype_fixed_rule(&self.sort(), &SORTS.bool_dt)]
     }
@@ -1183,7 +1161,7 @@ impl EgglogOp for Gather {
     fn cleanup(&self) -> bool {
         true
     }
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![dtype_propagation_rule(&self.sort(), "data")]
     }
     fn extract<'a>(
@@ -1288,7 +1266,7 @@ impl EgglogOp for SumReduce {
     fn cleanup(&self) -> bool {
         true
     }
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![dtype_propagation_rule(&self.sort(), "inp")]
     }
     fn extract<'a>(
@@ -1378,7 +1356,7 @@ impl EgglogOp for MaxReduce {
     fn cleanup(&self) -> bool {
         true
     }
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![dtype_propagation_rule(&self.sort(), "inp")]
     }
     fn extract<'a>(

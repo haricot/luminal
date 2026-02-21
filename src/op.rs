@@ -132,10 +132,10 @@ impl std::fmt::Display for ExecutionStats {
 
 pub trait EgglogOp: Debug {
     fn sort(&self) -> crate::egglog_utils::api::SortDef;
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<crate::egglog_utils::api::Rule> {
         vec![]
     }
-    fn early_rewrites(&self) -> Vec<String> {
+    fn early_rewrites(&self) -> Vec<crate::egglog_utils::api::Rule> {
         vec![]
     }
     fn cleanup(&self) -> bool;

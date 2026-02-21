@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use rand::{Rng, distr::Alphanumeric};
+
 // ========== Core Types ==========
 
 /// A sort class (type) — either a builtin like `i64` or a user-defined datatype like `Expr`.
@@ -94,14 +96,14 @@ pub struct Variant {
     pub fields: Vec<Field>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Var {
     pub name: String,
     pub sort: String,
 }
 
 /// Literal values for egglog's primitive builtin sorts.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Literal {
     I64(i64),
     F64(f64),
@@ -111,7 +113,7 @@ pub enum Literal {
 }
 
 /// Term — the core AST node for building egglog expressions.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Term {
     Var(Var),
     App { variant: String, args: Vec<Term> },
@@ -136,6 +138,8 @@ pub struct Rule {
     pub facts: Vec<Term>,
     pub actions: Vec<Action>,
     pub ruleset: Option<String>,
+    /// If set, `to_egglog_string()` returns this verbatim instead of generating from facts/actions.
+    raw: Option<String>,
 }
 
 /// Fresh variable name used internally by [`rewrite()`] desugaring.
@@ -148,6 +152,18 @@ impl Rule {
             facts: vec![],
             actions: vec![],
             ruleset: None,
+            raw: None,
+        }
+    }
+
+    /// Create a rule from a pre-formatted egglog string.
+    pub fn raw(s: impl ToString) -> Self {
+        Self {
+            name: None,
+            facts: vec![],
+            actions: vec![],
+            ruleset: None,
+            raw: Some(s.to_string()),
         }
     }
 
@@ -159,6 +175,10 @@ impl Rule {
     pub fn fact(mut self, fact: Term) -> Self {
         self.facts.push(fact);
         self
+    }
+
+    pub fn eq(self, lhs: Term, rhs: Term) -> Self {
+        self.fact(eq(lhs, rhs))
     }
 
     pub fn facts(mut self, facts: Vec<Term>) -> Self {
@@ -197,14 +217,109 @@ impl Rule {
         self.action(Action::Union(a, b))
     }
 
+    /// Sugar for `.action(Action::Subsume(a, b))`.
+    pub fn subsume(self, a: Term) -> Self {
+        self.action(Action::Subsume(a))
+    }
+
     /// Sugar for `.fact(eq(var, term))` — binds a pattern variable via equality.
     pub fn r#let(self, var: Term, term: Term) -> Self {
         self.fact(eq(var, term))
     }
 
+    /// Merge another rule into this one, combining facts and actions.
+    /// Keeps `self`'s name and ruleset if set, otherwise uses `other`'s.
+    pub fn merge(mut self, other: Rule) -> Self {
+        self.facts.extend(other.facts);
+        self.actions.extend(other.actions);
+        if self.name.is_none() {
+            self.name = other.name;
+        }
+        if self.ruleset.is_none() {
+            self.ruleset = other.ruleset;
+        }
+        self
+    }
+
     /// Convert this rule to its egglog string representation.
     pub fn to_egglog_string(&self) -> String {
+        if let Some(raw) = &self.raw {
+            return raw.clone();
+        }
         rule_to_egglog(self)
+    }
+
+    /// Build a rule from a list of actions, automatically deriving facts.
+    ///
+    /// For each `Union(lhs, rhs)` where `lhs` is an `App` term, this:
+    /// 1. Creates a fresh variable `?__rw0`, `?__rw1`, etc.
+    /// 2. Adds `(= ?__rwN lhs)` as a fact
+    /// 3. Replaces all occurrences of `lhs` in the action terms with `?__rwN`
+    pub fn from_actions(actions: Vec<Action>) -> Self {
+        let mut facts = Vec::new();
+        let mut replacements: Vec<(Term, Term)> = Vec::new();
+        let mut var_counter = 0;
+
+        // Identify App patterns from Union LHS and bind to fresh variables
+        for action in &actions {
+            if let Action::Union(lhs, _) = action {
+                if matches!(lhs, Term::App { .. }) {
+                    let fresh = v(format!("?__rw{}", var_counter));
+                    var_counter += 1;
+                    facts.push(eq(fresh.clone(), lhs.clone()));
+                    replacements.push((lhs.clone(), fresh));
+                }
+            }
+        }
+
+        let processed_actions = actions
+            .iter()
+            .map(|action| replace_in_action(action, &replacements))
+            .collect();
+
+        Rule {
+            name: None,
+            facts,
+            actions: processed_actions,
+            ruleset: None,
+            raw: None,
+        }
+    }
+}
+
+/// Replace structurally-equal sub-terms throughout an action.
+fn replace_in_action(action: &Action, replacements: &[(Term, Term)]) -> Action {
+    match action {
+        Action::Union(a, b) => Action::Union(
+            replace_in_term(a, replacements),
+            replace_in_term(b, replacements),
+        ),
+        Action::Set(a, b) => Action::Set(
+            replace_in_term(a, replacements),
+            replace_in_term(b, replacements),
+        ),
+        Action::Subsume(t) => Action::Subsume(replace_in_term(t, replacements)),
+        Action::Delete(t) => Action::Delete(replace_in_term(t, replacements)),
+    }
+}
+
+/// Walk a term tree and replace any sub-term that structurally matches
+/// an entry in `replacements`.
+fn replace_in_term(term: &Term, replacements: &[(Term, Term)]) -> Term {
+    for (original, replacement) in replacements {
+        if term == original {
+            return replacement.clone();
+        }
+    }
+    match term {
+        Term::App { variant, args } => Term::App {
+            variant: variant.clone(),
+            args: args
+                .iter()
+                .map(|a| replace_in_term(a, replacements))
+                .collect(),
+        },
+        other => other.clone(),
     }
 }
 
@@ -215,6 +330,129 @@ pub struct FunctionDef {
     pub args: Vec<String>,
     pub ret: String,
     pub merge: Option<String>,
+}
+
+// ========== Args ==========
+
+/// Named argument list for sort/function calls.
+///
+/// Supports adding arguments by name, indexing by field name to retrieve
+/// the generated variable, and passing directly to `SortDef::call`.
+#[derive(Clone, Debug)]
+pub struct Args {
+    entries: Vec<(String, Term)>,
+}
+
+impl Args {
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+        }
+    }
+
+    /// Add a named argument.
+    pub fn add(&mut self, name: impl ToString, value: Term) {
+        self.entries.push((name.to_string(), value));
+    }
+
+    /// Get the term for a field name. Panics if not found.
+    pub fn get(&self, name: &str) -> &Term {
+        self.entries
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, t)| t)
+            .unwrap_or_else(|| panic!("no argument named `{}`", name))
+    }
+
+    /// Remove and return the term for a field name. Panics if not found.
+    pub fn remove(&mut self, name: &str) -> Term {
+        let idx = self
+            .entries
+            .iter()
+            .position(|(n, _)| n == name)
+            .unwrap_or_else(|| panic!("no argument named `{}`", name));
+        self.entries.remove(idx).1
+    }
+
+    /// Extend with entries from anything convertible to `Args`.
+    pub fn extend(&mut self, other: impl IntoArgs) {
+        self.entries.extend(other.into_args().entries);
+    }
+}
+
+impl std::ops::Index<&str> for Args {
+    type Output = Term;
+    fn index(&self, name: &str) -> &Term {
+        self.get(name)
+    }
+}
+
+/// Trait for types that can be converted into an `Args`.
+pub trait IntoArgs {
+    fn into_args(self) -> Args;
+}
+
+impl IntoArgs for Args {
+    fn into_args(self) -> Args {
+        self
+    }
+}
+
+impl IntoArgs for &Args {
+    fn into_args(self) -> Args {
+        self.to_owned()
+    }
+}
+
+impl<S: ToString> IntoArgs for (S, Term) {
+    fn into_args(self) -> Args {
+        let mut args = Args::new();
+        args.add(self.0, self.1);
+        args
+    }
+}
+
+impl IntoArgs for () {
+    fn into_args(self) -> Args {
+        Args::new()
+    }
+}
+
+impl<S: ToString> IntoArgs for Vec<(S, Term)> {
+    fn into_args(self) -> Args {
+        let mut args = Args::new();
+        for (name, term) in self {
+            args.add(name, term);
+        }
+        args
+    }
+}
+
+impl<S: ToString, const N: usize> IntoArgs for [(S, Term); N] {
+    fn into_args(self) -> Args {
+        let mut args = Args::new();
+        for (name, term) in self {
+            args.add(name, term);
+        }
+        args
+    }
+}
+
+impl<S: ToString> IntoArgs for &[(S, Term)] {
+    fn into_args(self) -> Args {
+        let mut args = Args::new();
+        for (name, term) in self {
+            args.add(name.to_string(), term.clone());
+        }
+        args
+    }
+}
+
+impl std::ops::Deref for Args {
+    type Target = [(String, Term)];
+    fn deref(&self) -> &Self::Target {
+        &self.entries
+    }
 }
 
 // ========== Free-standing Sort Definition ==========
@@ -228,20 +466,39 @@ pub struct SortDef {
 }
 
 impl SortDef {
+    /// Call this sort on fresh variables, returning the args and the application term.
+    pub fn new_call(&self) -> (Args, Term) {
+        let prefix = rand::rng()
+            .sample_iter(&Alphanumeric)
+            .take(5)
+            .map(char::from)
+            .collect::<String>();
+        let mut args = Args::new();
+        for f in &self.fields {
+            args.add(&f.name, v(format!("{prefix}_{}", f.name)));
+        }
+        let term = self.call(&args);
+        (args, term)
+    }
+
     /// Construct a `Term::App` from this sort definition with named arguments.
-    pub fn call<const N: usize>(&self, args: [(&str, Term); N]) -> Term {
+    pub fn call(&self, args: impl IntoArgs) -> Term {
+        let args = args.into_args();
         assert_eq!(
-            N,
+            args.len(),
             self.fields.len(),
             "sort `{}` expects {} args, got {}",
             self.name,
             self.fields.len(),
-            N
+            args.len()
         );
 
-        let mut provided: HashMap<&str, Term> = args.into_iter().collect();
+        let mut provided: HashMap<String, Term> = args
+            .into_iter()
+            .map(|(s, t)| (s.to_string(), t.clone()))
+            .collect();
 
-        let mut ordered = Vec::with_capacity(N);
+        let mut ordered = Vec::with_capacity(args.len());
         for field in &self.fields {
             let term = provided.remove(field.name.as_str()).unwrap_or_else(|| {
                 panic!(
@@ -253,7 +510,7 @@ impl SortDef {
         }
 
         if !provided.is_empty() {
-            let extra: Vec<_> = provided.keys().copied().collect();
+            let extra: Vec<_> = provided.keys().cloned().collect();
             panic!(
                 "unexpected arguments in call to `{}`: {}",
                 self.name,
@@ -298,11 +555,12 @@ pub fn rewrite(name: &str, lhs: Term, rhs: Term) -> Rule {
         facts: vec![eq(v(RW_VAR), lhs)],
         actions: vec![Action::Union(v(RW_VAR), rhs)],
         ruleset: None,
+        raw: None,
     }
 }
 
-/// Create a general rule.
-pub fn rule() -> Rule {
+/// Create a general rule using the builder pattern.
+pub fn rule_builder() -> Rule {
     Rule::new()
 }
 
@@ -387,6 +645,65 @@ pub fn neq(a: Term, b: Term) -> Term {
         variant: "!=".to_string(),
         args: vec![a, b],
     }
+}
+
+// ========== Action Constructors ==========
+
+/// Create a Union action term.
+pub fn union(a: Term, b: Term) -> Action {
+    Action::Union(a, b)
+}
+
+/// Create a Set action term.
+pub fn set(func_app: Term, value: Term) -> Action {
+    Action::Set(func_app, value)
+}
+
+/// Create a Subsume action term.
+pub fn subsume(t: Term) -> Action {
+    Action::Subsume(t)
+}
+
+/// Create a Delete action term.
+pub fn delete(t: Term) -> Action {
+    Action::Delete(t)
+}
+
+// ========== Rule from Actions ==========
+
+/// Trait for types that can be converted into a `Rule`.
+pub trait IntoRule {
+    fn into_rule(self) -> Rule;
+}
+
+impl IntoRule for Action {
+    fn into_rule(self) -> Rule {
+        Rule::from_actions(vec![self])
+    }
+}
+
+impl IntoRule for Vec<Action> {
+    fn into_rule(self) -> Rule {
+        Rule::from_actions(self)
+    }
+}
+
+impl<const N: usize> IntoRule for [Action; N] {
+    fn into_rule(self) -> Rule {
+        Rule::from_actions(self.into())
+    }
+}
+
+/// Create a rule from actions. For `Union(lhs, rhs)` actions where `lhs` is
+/// an `App` term, automatically binds the pattern to a fresh variable and
+/// replaces all occurrences of that pattern in the action terms.
+pub fn rule(input: impl IntoRule) -> Rule {
+    input.into_rule()
+}
+
+/// Create an empty rule (builder pattern).
+pub fn empty_rule() -> Rule {
+    Rule::new()
 }
 
 // ========== Code Generation ==========

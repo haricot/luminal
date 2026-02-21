@@ -3,7 +3,7 @@ use std::{fmt::Debug, sync::Arc};
 use cudarc::driver::CudaStream;
 use luminal::{
     egglog_utils::{
-        api::{SortDef, sort},
+        api::{Rule, SortDef, sort},
         base::{ELIST, EXPRESSION, IR},
         extract_expr, extract_expr_list,
     },
@@ -49,8 +49,8 @@ impl EgglogOp for RowAdd {
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
-        vec!["(rule
+    fn rewrites(&self) -> Vec<Rule> {
+        vec![Rule::raw("(rule
             (
                 ; get add
                 (= ?sa (Add ?shape ?a ?a_stride ?b ?b_stride ?out_stride))
@@ -74,7 +74,7 @@ impl EgglogOp for RowAdd {
                 (set (dtype ?ra) (F32))
             )
             :name \"row add\"
-        )".to_string()]
+        )")]
     }
 
     fn cleanup(&self) -> bool {
@@ -198,9 +198,9 @@ impl EgglogOp for RowSwishMul {
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![
-            "(rule
+            Rule::raw("(rule
             (
                 (= ?sigmoid (Sigmoid
                     (ECons ?batch (ECons ?width (ENil)))
@@ -241,8 +241,7 @@ impl EgglogOp for RowSwishMul {
                 (set (dtype ?rsm) (F32))
             )
             :name \"row swish mul\"
-        )"
-            .to_string(),
+        )"),
         ]
     }
 
@@ -381,9 +380,9 @@ impl EgglogOp for RowRMSNorm {
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![
-            "(rule
+            Rule::raw("(rule
             (
                 (= ?square (Mul ?inp_range ?x ?inp_stride ?x ?inp_stride ?square_stride))
                 (= ?width (nth_from_end ?inp_range 0))
@@ -470,8 +469,7 @@ impl EgglogOp for RowRMSNorm {
                 (set (dtype ?new) (F32))
             )
             :name \"row rms norm\"
-        )"
-            .to_string(),
+        )"),
         ]
     }
 
@@ -635,22 +633,21 @@ impl EgglogOp for RowRope {
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![
-            "(rule
+            Rule::raw("(rule
            (
                 (= ?e (RowRope ?shape ?inp ?stride ?row_width ?pos_ids))
                 (= (F32) (dtype ?inp))
             )
            ((set (dtype ?e) (F32)))
-        )"
-            .to_string(),
+        )"),
         ]
     }
 
-    fn early_rewrites(&self) -> Vec<String> {
+    fn early_rewrites(&self) -> Vec<Rule> {
         vec![
-        r#"
+        Rule::raw(r#"
             (rule
               (
                 ;; Bind the head-count and hidden-dim directly from the places they appear.
@@ -897,7 +894,7 @@ impl EgglogOp for RowRope {
               )
               :name "row rope"
             )
-        "#.to_string()]
+        "#)]
     }
 }
 
@@ -1031,10 +1028,10 @@ impl EgglogOp for TileMatmulSplitK {
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![
             // Direct Mul -> Sum -> TileMatmulSplitK (A row-major, B col-major, C row-major)
-            format!(
+            Rule::raw(format!(
                 "
         (rule
             (
@@ -1126,7 +1123,7 @@ impl EgglogOp for TileMatmulSplitK {
         )",
                 ts = TILE_SIZE,
                 kc = K_CHUNK_SIZE
-            ),
+            )),
         ]
     }
 
@@ -1426,10 +1423,10 @@ impl EgglogOp for TileMatmulFullSplit {
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![
             // Match Mul -> Sum pattern for matmul (A row-major, B col-major)
-            format!(
+            Rule::raw(format!(
                 "
         (rule
             (
@@ -1513,7 +1510,7 @@ impl EgglogOp for TileMatmulFullSplit {
         )",
                 ts = TILE_SIZE,
                 sm_count = 56 // Optimal: balances task count reduction with parallelism
-            ),
+            )),
         ]
     }
 
@@ -1832,10 +1829,10 @@ impl EgglogOp for RowEmbed {
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
         vec![
             // Match Gather with Add(Mul(Cast(token_ids), const), Iota) indices
-            "(rule
+            Rule::raw("(rule
                 (
                     (= ?gather (Gather ?indices ?idx_shape ?idx_stride ?embed_table ?embed_shape ?embed_stride))
                     (= ?indices (Add ?add_shape ?mul_result ?mul_stride ?iota_result ?iota_stride ?add_out_stride))
@@ -1851,9 +1848,9 @@ impl EgglogOp for RowEmbed {
                     (set (dtype ?re) (F32))
                 )
                 :name \"row embed with cast mul\"
-            )".to_string(),
+            )"),
             // Match Gather with Add(Iota, Mul(Cast(token_ids), const)) indices (reversed order)
-            "(rule
+            Rule::raw("(rule
                 (
                     (= ?gather (Gather ?indices ?idx_shape ?idx_stride ?embed_table ?embed_shape ?embed_stride))
                     (= ?indices (Add ?add_shape ?iota_result ?iota_stride ?mul_result ?mul_stride ?add_out_stride))
@@ -1869,9 +1866,9 @@ impl EgglogOp for RowEmbed {
                     (set (dtype ?re) (F32))
                 )
                 :name \"row embed with cast mul reversed\"
-            )".to_string(),
+            )"),
             // Match Gather with Add(Mul(token_ids, const), Iota) indices (no Cast)
-            "(rule
+            Rule::raw("(rule
                 (
                     (= ?gather (Gather ?indices ?idx_shape ?idx_stride ?embed_table ?embed_shape ?embed_stride))
                     (= ?indices (Add ?add_shape ?mul_result ?mul_stride ?iota_result ?iota_stride ?add_out_stride))
@@ -1886,9 +1883,9 @@ impl EgglogOp for RowEmbed {
                     (set (dtype ?re) (F32))
                 )
                 :name \"row embed with mul\"
-            )".to_string(),
+            )"),
             // Match Gather with Add(Iota, Mul(token_ids, const)) indices (reversed order, no Cast)
-            "(rule
+            Rule::raw("(rule
                 (
                     (= ?gather (Gather ?indices ?idx_shape ?idx_stride ?embed_table ?embed_shape ?embed_stride))
                     (= ?indices (Add ?add_shape ?iota_result ?iota_stride ?mul_result ?mul_stride ?add_out_stride))
@@ -1903,7 +1900,7 @@ impl EgglogOp for RowEmbed {
                     (set (dtype ?re) (F32))
                 )
                 :name \"row embed with mul reversed\"
-            )".to_string(),
+            )"),
         ]
     }
 
