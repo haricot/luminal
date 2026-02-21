@@ -1,6 +1,6 @@
 use luminal::{
     egglog_utils::{
-        api::{Rule, SortDef, sort},
+        api::{sort, Rule, SortDef},
         base::IR,
     },
     graph::Graph,
