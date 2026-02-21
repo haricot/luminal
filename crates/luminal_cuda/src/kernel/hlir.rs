@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::{cuda_dtype, kernel::KernelOp};
 use cudarc::{
     driver::{CudaContext, CudaFunction, CudaModule, CudaSlice, CudaStream},
-    nvrtc::{CompileOptions, compile_ptx},
+    nvrtc::{CompileOptions, compile_ptx, compile_ptx_with_opts},
 };
 use itertools::Itertools;
 use luminal::{
@@ -16,6 +16,43 @@ use luminal::{
     op::*,
     prelude::*,
 };
+
+/// Generates CUDA include directives based on the dtypes used in a kernel
+pub fn dtype_includes(dtypes: &[DType]) -> String {
+    let needs_fp16 = dtypes.iter().any(|d| matches!(d, DType::F16));
+    let needs_bf16 = dtypes.iter().any(|d| matches!(d, DType::Bf16));
+    format!(
+        "{}{}",
+        if needs_fp16 {
+            "#include <cuda_fp16.h>\n"
+        } else {
+            ""
+        },
+        if needs_bf16 {
+            "#include <cuda_bf16.h>\n"
+        } else {
+            ""
+        },
+    )
+}
+
+/// Compiles a CUDA kernel with proper include paths for f16/bf16 types
+pub fn compile_kernel(kernel: &str, dtypes: &[DType]) -> cudarc::nvrtc::Ptx {
+    let needs_special_types = dtypes.iter().any(|d| matches!(d, DType::F16 | DType::Bf16));
+
+    if needs_special_types {
+        compile_ptx_with_opts(
+            kernel,
+            CompileOptions {
+                include_paths: vec!["/usr/local/cuda/include".to_string()],
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    } else {
+        compile_ptx(kernel).unwrap()
+    }
+}
 
 pub type Ops = (
     KernelAdd,
@@ -33,6 +70,7 @@ pub type Ops = (
     KernelSqrt,
     KernelConstant,
     KernelCast,
+    KernelEmbed,
 );
 
 /// Build a rewrite that matches an HLIR op, reads dtype(s) from the given source fields,
@@ -126,6 +164,7 @@ impl KernelOp for KernelMaxReduce {
             .collect::<FxHashSet<_>>();
 
         let dtype = cuda_dtype(self.dtype);
+        let includes = dtype_includes(&[self.dtype]);
         let n_outputs: Expression = self.out_shape.iter().copied().product();
         let threads_per_block = 256; // 8 warps per block
         let (dyn_defines, _sorted_dims) = generate_dyn_dims_defines(&vars);
@@ -136,7 +175,7 @@ impl KernelOp for KernelMaxReduce {
         };
 
         let kernel = format!(
-            "
+            "{includes}
 #define WARP_SIZE 32
 #define THREADS_PER_BLOCK 256
 #define FULL_MASK 0xffffffff
@@ -195,7 +234,7 @@ extern \"C\" {{
         let (module, func) = if let Some((module, func)) = compile_cache.get(&kernel) {
             (module.clone(), func.clone())
         } else {
-            let ptx = compile_ptx(&kernel).unwrap();
+            let ptx = compile_kernel(&kernel, &[self.dtype]);
             let module = stream.context().load_module(ptx).unwrap();
             let func = module.load_function("reduce_max_k").unwrap();
             compile_cache.insert(kernel.clone(), (module.clone(), func.clone()));
@@ -217,12 +256,30 @@ extern \"C\" {{
         self.out_shape.iter().copied().product()
     }
 
+    fn output_bytes(&self) -> Expression {
+        let elem_size: Expression = match self.dtype {
+            DType::F32 | DType::Int => 4,
+            DType::F16 | DType::Bf16 => 2,
+            DType::Bool => 1,
+            DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
+        }
+        .into();
+        self.output_size() * elem_size
+    }
+
     fn bytes_loaded(&self) -> Expression {
-        self.out_shape.iter().copied().product::<Expression>() * self.iters * 4
+        let elem_size: Expression = match self.dtype {
+            DType::F32 | DType::Int => 4,
+            DType::F16 | DType::Bf16 => 2,
+            DType::Bool => 1,
+            DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
+        }
+        .into();
+        self.out_shape.iter().copied().product::<Expression>() * self.iters * elem_size
     }
 
     fn bytes_stored(&self) -> Expression {
-        self.output_size() * 4
+        self.output_bytes()
     }
 
     fn flops(&self) -> Expression {
@@ -314,6 +371,7 @@ impl KernelOp for KernelSumReduce {
             .collect::<FxHashSet<_>>();
 
         let dtype = cuda_dtype(self.dtype);
+        let includes = dtype_includes(&[self.dtype]);
         let n_outputs: Expression = self.out_shape.iter().copied().product();
         let (dyn_defines, _sorted_dims) = generate_dyn_dims_defines(&vars);
         let dyn_dims_param = if vars.is_empty() {
@@ -323,7 +381,7 @@ impl KernelOp for KernelSumReduce {
         };
 
         let kernel = format!(
-            "
+            "{includes}
 {dyn_defines}
 extern \"C\" {{
     __global__ void reduce_sum_k({dtype} *out, const {dtype} *in{dyn_dims_param}) {{
@@ -351,7 +409,7 @@ extern \"C\" {{
         let (module, func) = if let Some((module, func)) = compile_cache.get(&kernel) {
             (module.clone(), func.clone())
         } else {
-            let ptx = compile_ptx(&kernel).unwrap();
+            let ptx = compile_kernel(&kernel, &[self.dtype]);
             let module = stream.context().load_module(ptx).unwrap();
             let func = module.load_function("reduce_sum_k").unwrap();
             compile_cache.insert(kernel.clone(), (module.clone(), func.clone()));
@@ -373,12 +431,30 @@ extern \"C\" {{
         self.out_shape.iter().copied().product()
     }
 
+    fn output_bytes(&self) -> Expression {
+        let elem_size: Expression = match self.dtype {
+            DType::F32 | DType::Int => 4,
+            DType::F16 | DType::Bf16 => 2,
+            DType::Bool => 1,
+            DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
+        }
+        .into();
+        self.output_size() * elem_size
+    }
+
     fn bytes_loaded(&self) -> Expression {
-        self.out_shape.iter().copied().product::<Expression>() * self.iters * 4
+        let elem_size: Expression = match self.dtype {
+            DType::F32 | DType::Int => 4,
+            DType::F16 | DType::Bf16 => 2,
+            DType::Bool => 1,
+            DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
+        }
+        .into();
+        self.out_shape.iter().copied().product::<Expression>() * self.iters * elem_size
     }
 
     fn bytes_stored(&self) -> Expression {
-        self.output_size() * 4
+        self.output_bytes()
     }
 
     fn flops(&self) -> Expression {
@@ -467,6 +543,8 @@ impl KernelOp for KernelAdd {
             .chain(self.out_stride.iter().flat_map(|e| e.dyn_vars()))
             .collect::<FxHashSet<_>>();
         let dtype = cuda_dtype(self.dtype);
+        let b_dtype = cuda_dtype(self.b_dtype);
+        let includes = dtype_includes(&[self.dtype, self.b_dtype]);
         let (dyn_defines, _sorted_dims) = generate_dyn_dims_defines(&vars);
         // Add dyn_dims parameter if we have dynamic dimensions
         let dyn_dims_param = if vars.is_empty() {
@@ -475,7 +553,7 @@ impl KernelOp for KernelAdd {
             ", const int* dyn_dims"
         };
         let kernel = format!(
-            "
+            "{includes}
 {dyn_defines}
 extern \"C\" {{
     __global__ void add_k({dtype} *C, const {dtype} *A, const {dtype} *B{dyn_dims_param}) {{
@@ -490,7 +568,7 @@ extern \"C\" {{
         let (module, func) = if let Some((module, func)) = compile_cache.get(&kernel) {
             (module.clone(), func.clone())
         } else {
-            let ptx = compile_ptx(&kernel).unwrap();
+            let ptx = compile_kernel(&kernel, &[self.dtype, self.b_dtype]);
             let module = stream.context().load_module(ptx).unwrap();
             let func = module.load_function("add_k").unwrap();
             compile_cache.insert(kernel.clone(), (module.clone(), func.clone()));
@@ -513,12 +591,37 @@ extern \"C\" {{
         self.out_shape.iter().copied().product()
     }
 
+    fn output_bytes(&self) -> Expression {
+        let elem_size: Expression = match self.dtype {
+            DType::F32 | DType::Int => 4,
+            DType::F16 | DType::Bf16 => 2,
+            DType::Bool => 1,
+            DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
+        }
+        .into();
+        self.output_size() * elem_size
+    }
+
     fn bytes_loaded(&self) -> Expression {
-        self.output_size() * 4 * 2
+        let a_elem_size: Expression = match self.dtype {
+            DType::F32 | DType::Int => 4,
+            DType::F16 | DType::Bf16 => 2,
+            DType::Bool => 1,
+            DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
+        }
+        .into();
+        let b_elem_size: Expression = match self.b_dtype {
+            DType::F32 | DType::Int => 4,
+            DType::F16 | DType::Bf16 => 2,
+            DType::Bool => 1,
+            DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
+        }
+        .into();
+        self.output_size() * a_elem_size + self.output_size() * b_elem_size
     }
 
     fn bytes_stored(&self) -> Expression {
-        self.output_size() * 4
+        self.output_bytes()
     }
 
     fn flops(&self) -> Expression {
@@ -607,6 +710,8 @@ impl KernelOp for KernelMul {
             .chain(self.out_stride.iter().flat_map(|e| e.dyn_vars()))
             .collect::<FxHashSet<_>>();
         let dtype = cuda_dtype(self.dtype);
+        let b_dtype = cuda_dtype(self.b_dtype);
+        let includes = dtype_includes(&[self.dtype, self.b_dtype]);
         let (dyn_defines, _sorted_dims) = generate_dyn_dims_defines(&vars);
         let dyn_dims_param = if vars.is_empty() {
             ""
@@ -614,7 +719,7 @@ impl KernelOp for KernelMul {
             ", const int* dyn_dims"
         };
         let kernel = format!(
-            "
+            "{includes}
 {dyn_defines}
 extern \"C\" {{
     __global__ void mul_k({dtype} *C, const {dtype} *A, const {dtype} *B{dyn_dims_param}) {{
@@ -629,7 +734,7 @@ extern \"C\" {{
         let (module, func) = if let Some((module, func)) = compile_cache.get(&kernel) {
             (module.clone(), func.clone())
         } else {
-            let ptx = compile_ptx(&kernel).unwrap();
+            let ptx = compile_kernel(&kernel, &[self.dtype, self.b_dtype]);
             let module = stream.context().load_module(ptx).unwrap();
             let func = module.load_function("mul_k").unwrap();
             compile_cache.insert(kernel.clone(), (module.clone(), func.clone()));
@@ -651,12 +756,37 @@ extern \"C\" {{
         self.out_shape.iter().copied().product()
     }
 
+    fn output_bytes(&self) -> Expression {
+        let elem_size: Expression = match self.dtype {
+            DType::F32 | DType::Int => 4,
+            DType::F16 | DType::Bf16 => 2,
+            DType::Bool => 1,
+            DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
+        }
+        .into();
+        self.output_size() * elem_size
+    }
+
     fn bytes_loaded(&self) -> Expression {
-        self.output_size() * 4 * 2
+        let a_elem_size: Expression = match self.dtype {
+            DType::F32 | DType::Int => 4,
+            DType::F16 | DType::Bf16 => 2,
+            DType::Bool => 1,
+            DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
+        }
+        .into();
+        let b_elem_size: Expression = match self.b_dtype {
+            DType::F32 | DType::Int => 4,
+            DType::F16 | DType::Bf16 => 2,
+            DType::Bool => 1,
+            DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
+        }
+        .into();
+        self.output_size() * a_elem_size + self.output_size() * b_elem_size
     }
 
     fn bytes_stored(&self) -> Expression {
-        self.output_size() * 4
+        self.output_bytes()
     }
 
     fn flops(&self) -> Expression {
@@ -759,6 +889,7 @@ impl KernelOp for KernelGather {
             .chain(self.out_stride.iter().flat_map(|e| e.dyn_vars()))
             .collect::<FxHashSet<_>>();
         let dtype = cuda_dtype(self.dtype);
+        let includes = dtype_includes(&[self.dtype]);
         let (dyn_defines, _sorted_dims) = generate_dyn_dims_defines(&vars);
         let dyn_dims_param = if vars.is_empty() {
             ""
@@ -766,7 +897,7 @@ impl KernelOp for KernelGather {
             ", const int* dyn_dims"
         };
         let kernel = format!(
-            "
+            "{includes}
 {dyn_defines}
 extern \"C\" {{
     __global__ void gather({dtype} *C, const int *indexes, const {dtype} *data{dyn_dims_param}) {{
@@ -783,7 +914,7 @@ extern \"C\" {{
         let (module, func) = if let Some((module, func)) = compile_cache.get(&kernel) {
             (module.clone(), func.clone())
         } else {
-            let ptx = compile_ptx(&kernel).unwrap();
+            let ptx = compile_kernel(&kernel, &[self.dtype]);
             let module = stream.context().load_module(ptx).unwrap();
             let func = module.load_function("gather").unwrap();
             compile_cache.insert(kernel.clone(), (module.clone(), func.clone()));
@@ -804,12 +935,31 @@ extern \"C\" {{
         self.out_shape.iter().copied().product()
     }
 
+    fn output_bytes(&self) -> Expression {
+        let elem_size: Expression = match self.dtype {
+            DType::F32 | DType::Int => 4,
+            DType::F16 | DType::Bf16 => 2,
+            DType::Bool => 1,
+            DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
+        }
+        .into();
+        self.output_size() * elem_size
+    }
+
     fn bytes_loaded(&self) -> Expression {
-        self.output_size() * 4 * 2
+        let data_elem_size: Expression = match self.dtype {
+            DType::F32 | DType::Int => 4,
+            DType::F16 | DType::Bf16 => 2,
+            DType::Bool => 1,
+            DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
+        }
+        .into();
+        // Data + indices (indices are always int32)
+        self.output_size() * data_elem_size + self.output_size() * 4
     }
 
     fn bytes_stored(&self) -> Expression {
-        self.output_size() * 4
+        self.output_bytes()
     }
 
     fn flops(&self) -> Expression {
@@ -901,7 +1051,7 @@ extern \"C\" {{
         let (module, func) = if let Some((module, func)) = compile_cache.get(&kernel) {
             (module.clone(), func.clone())
         } else {
-            let ptx = compile_ptx(&kernel).unwrap();
+            let ptx = compile_kernel(&kernel, &[DType::Int]);
             let module = stream.context().load_module(ptx).unwrap();
             let func = module.load_function("iota_k").unwrap();
             compile_cache.insert(kernel.clone(), (module.clone(), func.clone()));
@@ -922,12 +1072,17 @@ extern \"C\" {{
         self.range
     }
 
+    fn output_bytes(&self) -> Expression {
+        // Iota always outputs int32 (4 bytes)
+        self.output_size() * 4
+    }
+
     fn bytes_loaded(&self) -> Expression {
         0.into()
     }
 
     fn bytes_stored(&self) -> Expression {
-        self.output_size() * 4
+        self.output_bytes()
     }
 
     fn flops(&self) -> Expression {
@@ -1016,6 +1171,7 @@ impl KernelOp for KernelExp2 {
             .chain(self.out_strides.iter().flat_map(|e| e.dyn_vars()))
             .collect::<FxHashSet<_>>();
         let dtype = cuda_dtype(self.dtype);
+        let includes = dtype_includes(&[self.dtype]);
         let (dyn_defines, _sorted_dims) = generate_dyn_dims_defines(&vars);
         let dyn_dims_param = if vars.is_empty() {
             ""
@@ -1023,7 +1179,7 @@ impl KernelOp for KernelExp2 {
             ", const int* dyn_dims"
         };
         let kernel = format!(
-            "
+            "{includes}
 {dyn_defines}
 extern \"C\" {{
     __global__ void exp2_k({dtype} *out, const {dtype} *in{dyn_dims_param}) {{
@@ -1037,7 +1193,7 @@ extern \"C\" {{
         let (module, func) = if let Some((module, func)) = compile_cache.get(&kernel) {
             (module.clone(), func.clone())
         } else {
-            let ptx = compile_ptx(&kernel).unwrap();
+            let ptx = compile_kernel(&kernel, &[self.dtype]);
             let module = stream.context().load_module(ptx).unwrap();
             let func = module.load_function("exp2_k").unwrap();
             compile_cache.insert(kernel.clone(), (module.clone(), func.clone()));
@@ -1059,12 +1215,23 @@ extern \"C\" {{
         self.shape.iter().copied().product()
     }
 
+    fn output_bytes(&self) -> Expression {
+        let elem_size: Expression = match self.dtype {
+            DType::F32 | DType::Int => 4,
+            DType::F16 | DType::Bf16 => 2,
+            DType::Bool => 1,
+            DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
+        }
+        .into();
+        self.output_size() * elem_size
+    }
+
     fn bytes_loaded(&self) -> Expression {
-        self.output_size() * 4
+        self.output_bytes()
     }
 
     fn bytes_stored(&self) -> Expression {
-        self.output_size() * 4
+        self.output_bytes()
     }
 
     fn flops(&self) -> Expression {
@@ -1149,6 +1316,7 @@ impl KernelOp for KernelLog2 {
             .chain(self.out_strides.iter().flat_map(|e| e.dyn_vars()))
             .collect::<FxHashSet<_>>();
         let dtype = cuda_dtype(self.dtype);
+        let includes = dtype_includes(&[self.dtype]);
         let (dyn_defines, _sorted_dims) = generate_dyn_dims_defines(&vars);
         let dyn_dims_param = if vars.is_empty() {
             ""
@@ -1156,7 +1324,7 @@ impl KernelOp for KernelLog2 {
             ", const int* dyn_dims"
         };
         let kernel = format!(
-            "
+            "{includes}
 {dyn_defines}
 extern \"C\" {{
     __global__ void log2_k({dtype} *out, const {dtype} *in{dyn_dims_param}) {{
@@ -1170,7 +1338,7 @@ extern \"C\" {{
         let (module, func) = if let Some((module, func)) = compile_cache.get(&kernel) {
             (module.clone(), func.clone())
         } else {
-            let ptx = compile_ptx(&kernel).unwrap();
+            let ptx = compile_kernel(&kernel, &[self.dtype]);
             let module = stream.context().load_module(ptx).unwrap();
             let func = module.load_function("log2_k").unwrap();
             compile_cache.insert(kernel.clone(), (module.clone(), func.clone()));
@@ -1192,12 +1360,23 @@ extern \"C\" {{
         self.shape.iter().copied().product()
     }
 
+    fn output_bytes(&self) -> Expression {
+        let elem_size: Expression = match self.dtype {
+            DType::F32 | DType::Int => 4,
+            DType::F16 | DType::Bf16 => 2,
+            DType::Bool => 1,
+            DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
+        }
+        .into();
+        self.output_size() * elem_size
+    }
+
     fn bytes_loaded(&self) -> Expression {
-        self.output_size() * 4
+        self.output_bytes()
     }
 
     fn bytes_stored(&self) -> Expression {
-        self.output_size() * 4
+        self.output_bytes()
     }
 
     fn flops(&self) -> Expression {
@@ -1282,6 +1461,7 @@ impl KernelOp for KernelSin {
             .chain(self.out_strides.iter().flat_map(|e| e.dyn_vars()))
             .collect::<FxHashSet<_>>();
         let dtype = cuda_dtype(self.dtype);
+        let includes = dtype_includes(&[self.dtype]);
         let (dyn_defines, _sorted_dims) = generate_dyn_dims_defines(&vars);
         let dyn_dims_param = if vars.is_empty() {
             ""
@@ -1289,7 +1469,7 @@ impl KernelOp for KernelSin {
             ", const int* dyn_dims"
         };
         let kernel = format!(
-            "
+            "{includes}
 {dyn_defines}
 extern \"C\" {{
     __global__ void sin_k({dtype} *out, const {dtype} *in{dyn_dims_param}) {{
@@ -1303,7 +1483,7 @@ extern \"C\" {{
         let (module, func) = if let Some((module, func)) = compile_cache.get(&kernel) {
             (module.clone(), func.clone())
         } else {
-            let ptx = compile_ptx(&kernel).unwrap();
+            let ptx = compile_kernel(&kernel, &[self.dtype]);
             let module = stream.context().load_module(ptx).unwrap();
             let func = module.load_function("sin_k").unwrap();
             compile_cache.insert(kernel.clone(), (module.clone(), func.clone()));
@@ -1325,12 +1505,23 @@ extern \"C\" {{
         self.shape.iter().copied().product()
     }
 
+    fn output_bytes(&self) -> Expression {
+        let elem_size: Expression = match self.dtype {
+            DType::F32 | DType::Int => 4,
+            DType::F16 | DType::Bf16 => 2,
+            DType::Bool => 1,
+            DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
+        }
+        .into();
+        self.output_size() * elem_size
+    }
+
     fn bytes_loaded(&self) -> Expression {
-        self.output_size() * 4
+        self.output_bytes()
     }
 
     fn bytes_stored(&self) -> Expression {
-        self.output_size() * 4
+        self.output_bytes()
     }
 
     fn flops(&self) -> Expression {
@@ -1415,6 +1606,7 @@ impl KernelOp for KernelRecip {
             .chain(self.out_strides.iter().flat_map(|e| e.dyn_vars()))
             .collect::<FxHashSet<_>>();
         let dtype = cuda_dtype(self.dtype);
+        let includes = dtype_includes(&[self.dtype]);
         let (dyn_defines, _sorted_dims) = generate_dyn_dims_defines(&vars);
         let dyn_dims_param = if vars.is_empty() {
             ""
@@ -1422,7 +1614,7 @@ impl KernelOp for KernelRecip {
             ", const int* dyn_dims"
         };
         let kernel = format!(
-            "
+            "{includes}
 {dyn_defines}
 extern \"C\" {{
     __global__ void recip_k({dtype} *out, const {dtype} *in{dyn_dims_param}) {{
@@ -1436,7 +1628,7 @@ extern \"C\" {{
         let (module, func) = if let Some((module, func)) = compile_cache.get(&kernel) {
             (module.clone(), func.clone())
         } else {
-            let ptx = compile_ptx(&kernel).unwrap();
+            let ptx = compile_kernel(&kernel, &[self.dtype]);
             let module = stream.context().load_module(ptx).unwrap();
             let func = module.load_function("recip_k").unwrap();
             compile_cache.insert(kernel.clone(), (module.clone(), func.clone()));
@@ -1458,12 +1650,23 @@ extern \"C\" {{
         self.shape.iter().copied().product()
     }
 
+    fn output_bytes(&self) -> Expression {
+        let elem_size: Expression = match self.dtype {
+            DType::F32 | DType::Int => 4,
+            DType::F16 | DType::Bf16 => 2,
+            DType::Bool => 1,
+            DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
+        }
+        .into();
+        self.output_size() * elem_size
+    }
+
     fn bytes_loaded(&self) -> Expression {
-        self.output_size() * 4
+        self.output_bytes()
     }
 
     fn bytes_stored(&self) -> Expression {
-        self.output_size() * 4
+        self.output_bytes()
     }
 
     fn flops(&self) -> Expression {
@@ -1548,6 +1751,7 @@ impl KernelOp for KernelSqrt {
             .chain(self.out_strides.iter().flat_map(|e| e.dyn_vars()))
             .collect::<FxHashSet<_>>();
         let dtype = cuda_dtype(self.dtype);
+        let includes = dtype_includes(&[self.dtype]);
         let (dyn_defines, _sorted_dims) = generate_dyn_dims_defines(&vars);
         let dyn_dims_param = if vars.is_empty() {
             ""
@@ -1555,7 +1759,7 @@ impl KernelOp for KernelSqrt {
             ", const int* dyn_dims"
         };
         let kernel = format!(
-            "
+            "{includes}
 {dyn_defines}
 extern \"C\" {{
     __global__ void sqrt_k({dtype} *out, const {dtype} *in{dyn_dims_param}) {{
@@ -1569,7 +1773,7 @@ extern \"C\" {{
         let (module, func) = if let Some((module, func)) = compile_cache.get(&kernel) {
             (module.clone(), func.clone())
         } else {
-            let ptx = compile_ptx(&kernel).unwrap();
+            let ptx = compile_kernel(&kernel, &[self.dtype]);
             let module = stream.context().load_module(ptx).unwrap();
             let func = module.load_function("sqrt_k").unwrap();
             compile_cache.insert(kernel.clone(), (module.clone(), func.clone()));
@@ -1591,12 +1795,23 @@ extern \"C\" {{
         self.shape.iter().copied().product()
     }
 
+    fn output_bytes(&self) -> Expression {
+        let elem_size: Expression = match self.dtype {
+            DType::F32 | DType::Int => 4,
+            DType::F16 | DType::Bf16 => 2,
+            DType::Bool => 1,
+            DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
+        }
+        .into();
+        self.output_size() * elem_size
+    }
+
     fn bytes_loaded(&self) -> Expression {
-        self.output_size() * 4
+        self.output_bytes()
     }
 
     fn bytes_stored(&self) -> Expression {
-        self.output_size() * 4
+        self.output_bytes()
     }
 
     fn flops(&self) -> Expression {
@@ -1685,6 +1900,7 @@ impl KernelOp for KernelMod {
             .chain(self.out_stride.iter().flat_map(|e| e.dyn_vars()))
             .collect::<FxHashSet<_>>();
         let dtype = cuda_dtype(self.dtype);
+        let includes = dtype_includes(&[self.dtype]);
         let (dyn_defines, _sorted_dims) = generate_dyn_dims_defines(&vars);
         let dyn_dims_param = if vars.is_empty() {
             ""
@@ -1692,7 +1908,7 @@ impl KernelOp for KernelMod {
             ", const int* dyn_dims"
         };
         let kernel = format!(
-            "
+            "{includes}
 {dyn_defines}
 extern \"C\" {{
     __global__ void mod_k({dtype} *C, const {dtype} *A, const {dtype} *B{dyn_dims_param}) {{
@@ -1707,7 +1923,7 @@ extern \"C\" {{
         let (module, func) = if let Some((module, func)) = compile_cache.get(&kernel) {
             (module.clone(), func.clone())
         } else {
-            let ptx = compile_ptx(&kernel).unwrap();
+            let ptx = compile_kernel(&kernel, &[self.dtype]);
             let module = stream.context().load_module(ptx).unwrap();
             let func = module.load_function("mod_k").unwrap();
             compile_cache.insert(kernel.clone(), (module.clone(), func.clone()));
@@ -1729,12 +1945,24 @@ extern \"C\" {{
         self.out_shape.iter().copied().product()
     }
 
+    fn output_bytes(&self) -> Expression {
+        let elem_size: Expression = match self.dtype {
+            DType::F32 | DType::Int => 4,
+            DType::F16 | DType::Bf16 => 2,
+            DType::Bool => 1,
+            DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
+        }
+        .into();
+        self.output_size() * elem_size
+    }
+
     fn bytes_loaded(&self) -> Expression {
-        self.output_size() * 4 * 2
+        // Both inputs have same dtype
+        self.output_bytes() * 2
     }
 
     fn bytes_stored(&self) -> Expression {
-        self.output_size() * 4
+        self.output_bytes()
     }
 
     fn flops(&self) -> Expression {
@@ -1823,6 +2051,8 @@ impl KernelOp for KernelLessThan {
             .chain(self.out_stride.iter().flat_map(|e| e.dyn_vars()))
             .collect::<FxHashSet<_>>();
         let dtype = cuda_dtype(self.dtype);
+        let b_dtype = cuda_dtype(self.b_dtype);
+        let includes = dtype_includes(&[self.dtype, self.b_dtype]);
         let (dyn_defines, _sorted_dims) = generate_dyn_dims_defines(&vars);
         let dyn_dims_param = if vars.is_empty() {
             ""
@@ -1830,7 +2060,7 @@ impl KernelOp for KernelLessThan {
             ", const int* dyn_dims"
         };
         let kernel = format!(
-            "
+            "{includes}
 {dyn_defines}
 extern \"C\" {{
     __global__ void less_than_k(unsigned char *C, const {dtype} *A, const {dtype} *B{dyn_dims_param}) {{
@@ -1845,7 +2075,7 @@ extern \"C\" {{
         let (module, func) = if let Some((module, func)) = compile_cache.get(&kernel) {
             (module.clone(), func.clone())
         } else {
-            let ptx = compile_ptx(&kernel).unwrap();
+            let ptx = compile_kernel(&kernel, &[self.dtype, self.b_dtype]);
             let module = stream.context().load_module(ptx).unwrap();
             let func = module.load_function("less_than_k").unwrap();
             compile_cache.insert(kernel.clone(), (module.clone(), func.clone()));
@@ -1867,12 +2097,31 @@ extern \"C\" {{
         self.out_shape.iter().copied().product()
     }
 
+    fn output_bytes(&self) -> Expression {
+        // LessThan outputs Bool (unsigned char, 1 byte per element)
+        self.output_size()
+    }
+
     fn bytes_loaded(&self) -> Expression {
-        self.output_size() * 4 * 2
+        let a_elem_size: Expression = match self.dtype {
+            DType::F32 | DType::Int => 4,
+            DType::F16 | DType::Bf16 => 2,
+            DType::Bool => 1,
+            DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
+        }
+        .into();
+        let b_elem_size: Expression = match self.b_dtype {
+            DType::F32 | DType::Int => 4,
+            DType::F16 | DType::Bf16 => 2,
+            DType::Bool => 1,
+            DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
+        }
+        .into();
+        self.output_size() * a_elem_size + self.output_size() * b_elem_size
     }
 
     fn bytes_stored(&self) -> Expression {
-        self.output_size() * 4
+        self.output_bytes()
     }
 
     fn flops(&self) -> Expression {
@@ -1953,7 +2202,7 @@ extern \"C\" {{
         let (module, func) = if let Some((module, func)) = compile_cache.get(&kernel) {
             (module.clone(), func.clone())
         } else {
-            let ptx = compile_ptx(&kernel).unwrap();
+            let ptx = compile_kernel(&kernel, &[DType::F32]);
             let module = stream.context().load_module(ptx).unwrap();
             let func = module.load_function("constant_k").unwrap();
             compile_cache.insert(kernel.clone(), (module.clone(), func.clone()));
@@ -1974,12 +2223,17 @@ extern \"C\" {{
         1.into()
     }
 
+    fn output_bytes(&self) -> Expression {
+        // Constant always outputs F32
+        4.into()
+    }
+
     fn bytes_loaded(&self) -> Expression {
         0.into()
     }
 
     fn bytes_stored(&self) -> Expression {
-        4.into()
+        self.output_bytes()
     }
 
     fn flops(&self) -> Expression {
@@ -2059,9 +2313,10 @@ impl KernelOp for KernelCast {
     ) {
         let in_dtype = cuda_dtype(self.in_dtype);
         let out_dtype = cuda_dtype(self.out_dtype);
+        let includes = dtype_includes(&[self.in_dtype, self.out_dtype]);
 
         let kernel = format!(
-            "
+            "{includes}
 extern \"C\" {{
     __global__ void cast_k({out_dtype} *out, const {in_dtype} *in) {{
         long long const_z = (long long)blockIdx.x * blockDim.x + threadIdx.x;
@@ -2072,7 +2327,7 @@ extern \"C\" {{
         let (module, func) = if let Some((module, func)) = compile_cache.get(&kernel) {
             (module.clone(), func.clone())
         } else {
-            let ptx = compile_ptx(&kernel).unwrap();
+            let ptx = compile_kernel(&kernel, &[self.in_dtype, self.out_dtype]);
             let module = stream.context().load_module(ptx).unwrap();
             let func = module.load_function("cast_k").unwrap();
             compile_cache.insert(kernel.clone(), (module.clone(), func.clone()));
@@ -2093,12 +2348,16 @@ extern \"C\" {{
         self.size
     }
 
+    fn output_bytes(&self) -> Expression {
+        self.size * self.out_dtype.sizeof()
+    }
+
     fn bytes_loaded(&self) -> Expression {
         self.size * self.in_dtype.sizeof()
     }
 
     fn bytes_stored(&self) -> Expression {
-        self.size * self.out_dtype.sizeof()
+        self.output_bytes()
     }
 
     fn flops(&self) -> Expression {
@@ -2132,4 +2391,237 @@ pub fn generate_dyn_dims_defines(vars: &FxHashSet<char>) -> (String, Vec<char>) 
 /// Returns None if the dim is not in the set.
 pub fn get_dyn_dim_offset(dim: char, sorted_dims: &[char]) -> Option<usize> {
     sorted_dims.iter().position(|&d| d == dim)
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct KernelEmbed {
+    batch_shape: Vec<Expression>,  // batch dimensions (e.g., [seq_len])
+    token_stride: Vec<Expression>, // stride for token_ids input
+    out_stride: Vec<Expression>,   // stride for output
+    embed_dim: Expression,         // embedding dimension
+}
+
+impl EgglogOp for KernelEmbed {
+    fn term(&self) -> (String, Vec<OpParam>) {
+        (
+            "KernelEmbed".to_string(),
+            vec![EList, Input, EList, Input, EList, Expr],
+        )
+    }
+
+    fn rewrites(&self) -> Vec<String> {
+        vec![
+            // Match Gather with Add(Mul(Cast(token_ids), const), Iota) indices
+            "(rule
+                (
+                    (= ?gather (Gather ?indices ?idx_shape ?idx_stride ?embed_table ?embed_shape ?embed_stride))
+                    (= ?indices (Add ?add_shape ?mul_result ?mul_stride ?iota_result ?iota_stride ?add_out_stride))
+                    (= ?mul_result (Mul ?mul_shape ?token_ids_cast ?token_cast_stride ?mul_const ?mul_const_stride ?mul_out_stride))
+                    (= ?token_ids_cast (Cast ?token_ids ?cast_size ?cast_dtype))
+                    (= ?embed_dim (nth_from_end ?embed_shape 0))
+                    (= ?batch_shape (RemoveNthFromEnd ?idx_shape 0))
+                    (= ?out_stride_batch (RemoveNthFromEnd ?add_out_stride 0))
+                )
+                (
+                    (let ?ke (KernelEmbed ?batch_shape ?token_ids ?token_cast_stride ?embed_table ?out_stride_batch ?embed_dim))
+                    (union ?gather ?ke)
+                    (set (dtype ?ke) (F32))
+                )
+                :name \"kernel embed with cast mul\"
+            )".to_string(),
+            // Match Gather with Add(Iota, Mul(Cast(token_ids), const)) indices (reversed order)
+            "(rule
+                (
+                    (= ?gather (Gather ?indices ?idx_shape ?idx_stride ?embed_table ?embed_shape ?embed_stride))
+                    (= ?indices (Add ?add_shape ?iota_result ?iota_stride ?mul_result ?mul_stride ?add_out_stride))
+                    (= ?mul_result (Mul ?mul_shape ?token_ids_cast ?token_cast_stride ?mul_const ?mul_const_stride ?mul_out_stride))
+                    (= ?token_ids_cast (Cast ?token_ids ?cast_size ?cast_dtype))
+                    (= ?embed_dim (nth_from_end ?embed_shape 0))
+                    (= ?batch_shape (RemoveNthFromEnd ?idx_shape 0))
+                    (= ?out_stride_batch (RemoveNthFromEnd ?add_out_stride 0))
+                )
+                (
+                    (let ?ke (KernelEmbed ?batch_shape ?token_ids ?token_cast_stride ?embed_table ?out_stride_batch ?embed_dim))
+                    (union ?gather ?ke)
+                    (set (dtype ?ke) (F32))
+                )
+                :name \"kernel embed with cast mul reversed\"
+            )".to_string(),
+            // Match Gather with Add(Mul(token_ids, const), Iota) indices (no Cast)
+            "(rule
+                (
+                    (= ?gather (Gather ?indices ?idx_shape ?idx_stride ?embed_table ?embed_shape ?embed_stride))
+                    (= ?indices (Add ?add_shape ?mul_result ?mul_stride ?iota_result ?iota_stride ?add_out_stride))
+                    (= ?mul_result (Mul ?mul_shape ?token_ids ?token_stride ?mul_const ?mul_const_stride ?mul_out_stride))
+                    (= ?embed_dim (nth_from_end ?embed_shape 0))
+                    (= ?batch_shape (RemoveNthFromEnd ?idx_shape 0))
+                    (= ?out_stride_batch (RemoveNthFromEnd ?add_out_stride 0))
+                )
+                (
+                    (let ?ke (KernelEmbed ?batch_shape ?token_ids ?token_stride ?embed_table ?out_stride_batch ?embed_dim))
+                    (union ?gather ?ke)
+                    (set (dtype ?ke) (F32))
+                )
+                :name \"kernel embed with mul\"
+            )".to_string(),
+            // Match Gather with Add(Iota, Mul(token_ids, const)) indices (reversed order, no Cast)
+            "(rule
+                (
+                    (= ?gather (Gather ?indices ?idx_shape ?idx_stride ?embed_table ?embed_shape ?embed_stride))
+                    (= ?indices (Add ?add_shape ?iota_result ?iota_stride ?mul_result ?mul_stride ?add_out_stride))
+                    (= ?mul_result (Mul ?mul_shape ?token_ids ?token_stride ?mul_const ?mul_const_stride ?mul_out_stride))
+                    (= ?embed_dim (nth_from_end ?embed_shape 0))
+                    (= ?batch_shape (RemoveNthFromEnd ?idx_shape 0))
+                    (= ?out_stride_batch (RemoveNthFromEnd ?add_out_stride 0))
+                )
+                (
+                    (let ?ke (KernelEmbed ?batch_shape ?token_ids ?token_stride ?embed_table ?out_stride_batch ?embed_dim))
+                    (union ?gather ?ke)
+                    (set (dtype ?ke) (F32))
+                )
+                :name \"kernel embed with mul reversed\"
+            )".to_string(),
+        ]
+    }
+
+    fn cleanup(&self) -> bool {
+        false
+    }
+
+    fn extract<'a>(
+        &self,
+        egraph: &'a SerializedEGraph,
+        children: &[&'a ENodeId],
+        list_cache: &mut FxHashMap<&'a ENodeId, Vec<Expression>>,
+        expr_cache: &mut FxHashMap<&'a ENodeId, Expression>,
+    ) -> (LLIROp, Vec<&'a ENodeId>) {
+        (
+            LLIROp::new::<dyn KernelOp>(Box::new(Self {
+                batch_shape: extract_expr_list(egraph, children[0], list_cache, expr_cache)
+                    .unwrap(),
+                token_stride: extract_expr_list(egraph, children[2], list_cache, expr_cache)
+                    .unwrap(),
+                out_stride: extract_expr_list(egraph, children[4], list_cache, expr_cache).unwrap(),
+                embed_dim: extract_expr(egraph, children[5], expr_cache).unwrap(),
+            })),
+            vec![children[1], children[3]], // token_ids, embedding_table
+        )
+    }
+}
+
+impl KernelOp for KernelEmbed {
+    fn compile(
+        &self,
+        stream: &Arc<CudaStream>,
+        compile_cache: &mut FxHashMap<String, (Arc<CudaModule>, CudaFunction)>,
+    ) -> (
+        CudaFunction,
+        Arc<CudaModule>,
+        String,
+        (Expression, Expression, Expression),
+        (Expression, Expression, Expression),
+        Expression,
+        FxHashMap<char, CudaSlice<u8>>,
+    ) {
+        let batch_size = self
+            .batch_shape
+            .iter()
+            .copied()
+            .product::<Expression>()
+            .max(1);
+        let vars = self
+            .batch_shape
+            .iter()
+            .flat_map(|e| e.dyn_vars())
+            .chain(self.token_stride.iter().flat_map(|e| e.dyn_vars()))
+            .chain(self.out_stride.iter().flat_map(|e| e.dyn_vars()))
+            .chain(self.embed_dim.dyn_vars())
+            .collect::<FxHashSet<_>>();
+        let token_offset_expr =
+            flatten_mul_strides(&self.batch_shape, &self.token_stride).to_kernel();
+        let out_offset_expr = flatten_mul_strides(&self.batch_shape, &self.out_stride).to_kernel();
+        let embed_dim_expr = self.embed_dim.to_kernel();
+        let kernel = format!(
+            "
+{}
+extern \"C\" {{
+    __global__ void embed(float *out, const int *token_ids, const float *embed_table) {{
+        long long idx = (long long)blockIdx.x * blockDim.x + threadIdx.x;
+        long long embed_dim = {embed_dim_expr};
+        long long batch_idx = idx / embed_dim;
+        long long embed_idx = idx % embed_dim;
+        long long const_z = batch_idx;
+        long long token_offset = {token_offset_expr};
+        long long out_offset = {out_offset_expr};
+        int token_id = token_ids[token_offset];
+        out[out_offset * embed_dim + embed_idx] = embed_table[(long long)token_id * embed_dim + embed_idx];
+    }}
+}}",
+            vars.iter()
+                .map(|i| format!("__constant__ int const_{i}[1];"))
+                .join("\n"),
+        );
+        let (module, func) = if let Some((module, func)) = compile_cache.get(&kernel) {
+            (module.clone(), func.clone())
+        } else {
+            let ptx = compile_ptx(&kernel).unwrap();
+            let module = stream.context().load_module(ptx).unwrap();
+            let func = module.load_function("embed").unwrap();
+            compile_cache.insert(kernel.clone(), (module.clone(), func.clone()));
+            (module, func)
+        };
+        let constants = vars
+            .into_iter()
+            .map(|d| (d, module.get_global(&format!("const_{d}"), stream).unwrap()))
+            .collect();
+        let total_threads = batch_size * self.embed_dim;
+        (
+            func,
+            module,
+            kernel,
+            (total_threads, 1.into(), 1.into()),
+            (1.into(), 1.into(), 1.into()),
+            0.into(),
+            constants,
+        )
+    }
+
+    fn output_size(&self) -> Expression {
+        self.batch_shape
+            .iter()
+            .copied()
+            .product::<Expression>()
+            .max(1)
+            * self.embed_dim
+    }
+
+    fn output_bytes(&self) -> Expression {
+        // Embed outputs F32
+        self.output_size() * 4
+    }
+
+    fn bytes_loaded(&self) -> Expression {
+        let batch_size = self
+            .batch_shape
+            .iter()
+            .copied()
+            .product::<Expression>()
+            .max(1);
+        // Load: 1 token ID (4 bytes) per batch + 1 embedding row (embed_dim * 4 bytes) per batch
+        batch_size * (4 + self.embed_dim * 4)
+    }
+
+    fn bytes_stored(&self) -> Expression {
+        // Store: 1 embedding row per batch element
+        self.output_size() * 4
+    }
+
+    fn flops(&self) -> Expression {
+        // No FLOPs - just memory copy
+        0.into()
+    }
+
+    fn kernel_name(&self) -> &'static str {
+        "Embed"
+    }
 }

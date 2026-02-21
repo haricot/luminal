@@ -1,8 +1,5 @@
-use cudarc::cublas::{
-    CudaBlas,
-    sys::{cublasOperation_t, cublasSetStream_v2, cublasSgemm_v2, cublasStatus_t},
-};
-use cudarc::driver::{CudaStream, DevicePtr};
+use std::sync::{Arc, OnceLock};
+
 use luminal::{
     egglog_utils::{
         api::{Rule, SortDef, sort},
@@ -10,18 +7,28 @@ use luminal::{
         extract_expr,
     },
     op::{EgglogOp, LLIROp},
-    prelude::*,
+    prelude::{
+        tracing::{Level, span, trace},
+        *,
+    },
 };
-use std::sync::{Arc, OnceLock};
-use tracing::{Level, span, trace};
 
-use crate::{cudarc::driver::CudaSlice, host::HostOp};
+use crate::{
+    cudarc::{
+        cublas::{
+            CudaBlas,
+            sys::{cublasOperation_t, cublasSetStream_v2, cublasSgemm_v2, cublasStatus_t},
+        },
+        driver::{CudaSlice, CudaStream, DevicePtr},
+    },
+    host::HostOp,
+};
 
 /// Global shared cuBLAS handle to avoid per-operation workspace allocation
 static SHARED_CUBLAS: OnceLock<Arc<CudaBlas>> = OnceLock::new();
 
 /// Parse cuBLAS operation from egglog string (e.g., "\"T\"" -> CUBLAS_OP_T)
-fn parse_cublas_op(s: &str) -> cublasOperation_t {
+pub fn parse_cublas_op(s: &str) -> cublasOperation_t {
     // Strip quotes if present (egglog strings are stored with quotes)
     let stripped = s.trim_matches('"');
     match stripped {
@@ -239,5 +246,10 @@ impl HostOp for CuBlasSgemmV2 {
 
     fn output_size(&self) -> Expression {
         self.m * self.n
+    }
+
+    fn output_bytes(&self) -> Expression {
+        // CuBlasSgemmV2 is F32 only (Sgemm = Single precision)
+        self.output_size() * 4
     }
 }
