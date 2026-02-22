@@ -171,7 +171,6 @@ fn dtype_to_cuda_types(dtype: DType) -> (cudaDataType, cublasComputeType_t, cuda
         ),
         DType::Int => panic!("cuBLAS LT does not support integer matmul"),
         DType::Bool => panic!("cuBLAS LT does not support bool matmul"),
-        DType::NvFp4 | DType::Mxfp4 => todo!("cuBLAS LT FP4 matmul not yet implemented"),
     }
 }
 
@@ -200,7 +199,6 @@ impl HostOp for CuBlasLt {
             DType::F32 => 4u64,
             DType::F16 | DType::Bf16 => 2u64,
             DType::Int | DType::Bool => panic!("cuBLAS LT does not support integer/bool matmul"),
-            DType::NvFp4 | DType::Mxfp4 => todo!("cuBLAS LT FP4 matmul not yet implemented"),
         };
 
         // Alpha/beta scale values (all dtypes use F32 scale type)
@@ -366,7 +364,6 @@ impl HostOp for CuBlasLt {
             DType::F32 | DType::Int => 4,
             DType::F16 | DType::Bf16 => 2,
             DType::Bool => 1,
-            DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
         }
         .into();
         self.output_size() * elem_size

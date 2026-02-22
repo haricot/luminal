@@ -446,8 +446,6 @@ impl NativeOp for Cast {
                 NativeData::Int(i) => i.iter().map(|i| *i != 0).collect(),
                 NativeData::Bool(b) => b.clone(),
             }),
-            DType::NvFp4 => unimplemented!("Cast to NvFp4 is not supported in native interpreter"),
-            DType::Mxfp4 => unimplemented!("Cast to Mxfp4 is not supported in native interpreter"),
         }
     }
 }

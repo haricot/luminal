@@ -214,7 +214,6 @@ extern \"C\" {{
             DType::F32 | DType::Int => 4,
             DType::F16 | DType::Bf16 => 2,
             DType::Bool => 1,
-            DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
         }
         .into();
         self.output_size() * elem_size
@@ -225,7 +224,6 @@ extern \"C\" {{
             DType::F32 | DType::Int => 4,
             DType::F16 | DType::Bf16 => 2,
             DType::Bool => 1,
-            DType::NvFp4 | DType::Mxfp4 => todo!("FP4 element size not yet implemented"),
         }
         .into();
         self.out_shape.iter().copied().product::<Expression>() * self.iters * elem_size
