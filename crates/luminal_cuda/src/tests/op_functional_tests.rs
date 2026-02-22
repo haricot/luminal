@@ -11,9 +11,9 @@ use crate::runtime::CudaRuntime;
 
 #[allow(unused_imports)]
 use super::utilities::{
-    TOLERANCE_SAFETY_FACTOR, assert_close, dtype_epsilon, gen_slice_range, get_cuda_stream,
-    gpu_supports_dtype, random_f32_vec, random_i32_vec, test_binary_cuda, test_mod,
-    test_unary_cuda, to_candle_dtype,
+    GENOME_FUZZ_COUNT, TOLERANCE_SAFETY_FACTOR, assert_close, dtype_epsilon, fuzz_genomes,
+    gen_slice_range, get_cuda_stream, gpu_supports_dtype, random_f32_vec, random_i32_vec,
+    test_binary_cuda, test_mod, test_unary_cuda, to_candle_dtype,
 };
 
 proptest! {
@@ -547,7 +547,7 @@ fn run_embed_test(vocab_size: usize, embed_dim: usize, seq_len: usize, seed: u64
         .output();
 
     cx.build_search_space::<CudaRuntime>();
-    let mut rt = CudaRuntime::initialize(stream);
+    let mut rt = CudaRuntime::initialize(stream.clone());
 
     let token_data: Vec<i32> = random_i32_vec(seq_len, seed, 0, vocab_size as i32 - 1);
     let embed_data: Vec<f32> = random_f32_vec(vocab_size * embed_dim, seed, -0.5, 0.5);
@@ -570,6 +570,22 @@ fn run_embed_test(vocab_size: usize, embed_dim: usize, seq_len: usize, seed: u64
     let eps = dtype_epsilon(luminal::op::DType::F32);
     let tol = eps * TOLERANCE_SAFETY_FACTOR;
     assert_close(&result, &expected, tol, tol);
+
+    // Fuzz genomes: verify multiple graph rewrites produce consistent results
+    fuzz_genomes::<f32>(
+        &cx,
+        &stream,
+        |rt| {
+            rt.set_data(token_ids, token_data.clone());
+            rt.set_data(embed_table, embed_data.clone());
+        },
+        output.id,
+        &expected,
+        tol,
+        tol,
+        GENOME_FUZZ_COUNT,
+        seed,
+    );
 }
 
 proptest! {

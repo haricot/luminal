@@ -169,10 +169,7 @@ fn swiglu_mlp_ref(
 ) -> candle_core::Tensor {
     let gate = x.matmul(&w_gate.t().unwrap()).unwrap().silu().unwrap();
     let up = x.matmul(&w_up.t().unwrap()).unwrap();
-    (gate * up)
-        .unwrap()
-        .matmul(&w_down.t().unwrap())
-        .unwrap()
+    (gate * up).unwrap().matmul(&w_down.t().unwrap()).unwrap()
 }
 
 /// CPU reference for one transformer layer
@@ -199,7 +196,10 @@ fn transformer_layer_ref(
 
 // ---- Helper to generate weight data for a layer ----
 
-fn generate_layer_weights(layer: &MiniTransformerLayer, base_seed: u64) -> Vec<(GraphTensor, Vec<f32>)> {
+fn generate_layer_weights(
+    layer: &MiniTransformerLayer,
+    base_seed: u64,
+) -> Vec<(GraphTensor, Vec<f32>)> {
     layer
         .weights()
         .iter()
@@ -217,10 +217,7 @@ fn generate_layer_weights(layer: &MiniTransformerLayer, base_seed: u64) -> Vec<(
         .collect()
 }
 
-fn build_candle_ref(
-    input_data: &[f32],
-    weight_data: &[(GraphTensor, Vec<f32>)],
-) -> Vec<f32> {
+fn build_candle_ref(input_data: &[f32], weight_data: &[(GraphTensor, Vec<f32>)]) -> Vec<f32> {
     let device = candle_core::Device::Cpu;
     let ref_input =
         candle_core::Tensor::from_vec(input_data.to_vec(), (SEQ, HIDDEN), &device).unwrap();
@@ -324,8 +321,7 @@ fn test_mini_transformer_two_layers() {
 
     // Run two layers on CPU reference
     let device = candle_core::Device::Cpu;
-    let mut ref_x =
-        candle_core::Tensor::from_vec(input_data, (SEQ, HIDDEN), &device).unwrap();
+    let mut ref_x = candle_core::Tensor::from_vec(input_data, (SEQ, HIDDEN), &device).unwrap();
 
     for weights in [&layer1_weights, &layer2_weights] {
         let w = |idx: usize, shape: &[usize]| {
@@ -412,10 +408,8 @@ fn test_rms_norm_cuda() {
     let result = rt.get_f32(out);
 
     let device = candle_core::Device::Cpu;
-    let ref_input =
-        candle_core::Tensor::from_vec(input_data, (SEQ, HIDDEN), &device).unwrap();
-    let ref_weight =
-        candle_core::Tensor::from_vec(weight_data, HIDDEN, &device).unwrap();
+    let ref_input = candle_core::Tensor::from_vec(input_data, (SEQ, HIDDEN), &device).unwrap();
+    let ref_weight = candle_core::Tensor::from_vec(weight_data, HIDDEN, &device).unwrap();
     let expected = rms_norm_ref(&ref_input, &ref_weight, 1e-5);
     let expected: Vec<f32> = expected.flatten_all().unwrap().to_vec1().unwrap();
 
@@ -457,16 +451,11 @@ fn test_self_attention_cuda() {
     let result = rt.get_f32(out);
 
     let device = candle_core::Device::Cpu;
-    let ref_input =
-        candle_core::Tensor::from_vec(input_data, (SEQ, HIDDEN), &device).unwrap();
-    let ref_wq =
-        candle_core::Tensor::from_vec(wq_data, (HIDDEN, HIDDEN), &device).unwrap();
-    let ref_wk =
-        candle_core::Tensor::from_vec(wk_data, (HIDDEN, HIDDEN), &device).unwrap();
-    let ref_wv =
-        candle_core::Tensor::from_vec(wv_data, (HIDDEN, HIDDEN), &device).unwrap();
-    let ref_wo =
-        candle_core::Tensor::from_vec(wo_data, (HIDDEN, HIDDEN), &device).unwrap();
+    let ref_input = candle_core::Tensor::from_vec(input_data, (SEQ, HIDDEN), &device).unwrap();
+    let ref_wq = candle_core::Tensor::from_vec(wq_data, (HIDDEN, HIDDEN), &device).unwrap();
+    let ref_wk = candle_core::Tensor::from_vec(wk_data, (HIDDEN, HIDDEN), &device).unwrap();
+    let ref_wv = candle_core::Tensor::from_vec(wv_data, (HIDDEN, HIDDEN), &device).unwrap();
+    let ref_wo = candle_core::Tensor::from_vec(wo_data, (HIDDEN, HIDDEN), &device).unwrap();
 
     let expected = self_attention_ref(&ref_input, &ref_wq, &ref_wk, &ref_wv, &ref_wo);
     let expected: Vec<f32> = expected.flatten_all().unwrap().to_vec1().unwrap();
@@ -506,26 +495,12 @@ fn test_swiglu_mlp_cuda() {
     let result = rt.get_f32(out);
 
     let device = candle_core::Device::Cpu;
-    let ref_input =
-        candle_core::Tensor::from_vec(input_data, (SEQ, HIDDEN), &device).unwrap();
-    let ref_gate = candle_core::Tensor::from_vec(
-        gate_data,
-        (INTERMEDIATE, HIDDEN),
-        &device,
-    )
-    .unwrap();
-    let ref_up = candle_core::Tensor::from_vec(
-        up_data,
-        (INTERMEDIATE, HIDDEN),
-        &device,
-    )
-    .unwrap();
-    let ref_down = candle_core::Tensor::from_vec(
-        down_data,
-        (HIDDEN, INTERMEDIATE),
-        &device,
-    )
-    .unwrap();
+    let ref_input = candle_core::Tensor::from_vec(input_data, (SEQ, HIDDEN), &device).unwrap();
+    let ref_gate =
+        candle_core::Tensor::from_vec(gate_data, (INTERMEDIATE, HIDDEN), &device).unwrap();
+    let ref_up = candle_core::Tensor::from_vec(up_data, (INTERMEDIATE, HIDDEN), &device).unwrap();
+    let ref_down =
+        candle_core::Tensor::from_vec(down_data, (HIDDEN, INTERMEDIATE), &device).unwrap();
 
     let expected = swiglu_mlp_ref(&ref_input, &ref_gate, &ref_up, &ref_down);
     let expected: Vec<f32> = expected.flatten_all().unwrap().to_vec1().unwrap();
