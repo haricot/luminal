@@ -1,6 +1,14 @@
 use super::{MetalKernelOp, DYN_BUFFER_INDEX};
 use luminal::{
-    egglog_utils::SerializedEGraph, op::OpParam::*, op::*, prelude::*, shape::flatten_mul_strides,
+    egglog_utils::{
+        api::{app, eq, rule, set, sort, union, v, Rule, SortDef},
+        base::{dtype, DTYPE, ELIST, EXPRESSION, F64, IR, OP_SORTS, SORTS},
+        SerializedEGraph,
+    },
+    hlir::{Add, Cast, Constant, Gather, Iota, LessThan, MaxReduce, Mod, Mul, SumReduce},
+    op::*,
+    prelude::*,
+    shape::flatten_mul_strides,
 };
 use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, Device, MTLSize};
 
@@ -128,24 +136,21 @@ macro_rules! metal_unary_op {
         }
 
         impl EgglogOp for $name {
-            fn term(&self) -> (String, Vec<OpParam>) {
-                ($op_name.to_string(), vec![EList, Input, EList, EList])
+            fn sort(&self) -> SortDef {
+                OP_SORTS.unary($op_name)
             }
 
-            fn rewrites(&self) -> Vec<String> {
-                vec![format!(
-                    r#"(rule
-	                        ((= ?e ({} ?shape ?x ?x_stride ?out_stride))
-	                         (= ?dt (dtype ?x)))
-	                        ((let ?me ({} ?shape ?x ?x_stride ?out_stride))
-	                         (union ?e ?me)
-	                         (set (dtype ?me) ?dt))
-	                        :name "metal {}"
-	                    )"#,
-                    $op_name.replace("Metal", ""),
-                    $op_name,
-                    $op_name
-                )]
+            fn rewrites(&self) -> Vec<Rule> {
+                let hlir_name = ($op_name).strip_prefix("Metal").unwrap_or($op_name);
+                let hlir_sort = OP_SORTS.unary(hlir_name);
+                let (args, hlir_match) = hlir_sort.new_call();
+                let metal_op = self.sort().call(&args);
+                let dt = v("?__dt");
+                vec![rule([
+                    union(hlir_match, metal_op.clone()),
+                    set(dtype(metal_op), dt.clone()),
+                ])
+                .fact(eq(dt, dtype(args["inp"].clone())))]
             }
 
             fn cleanup(&self) -> bool {
@@ -272,32 +277,28 @@ pub struct MetalAdd {
 }
 
 impl EgglogOp for MetalAdd {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "MetalAdd".to_string(),
-            vec![EList, Input, EList, Input, EList, EList],
-        )
+    fn sort(&self) -> SortDef {
+        OP_SORTS.binary("MetalAdd")
     }
 
-    fn rewrites(&self) -> Vec<String> {
+    fn rewrites(&self) -> Vec<Rule> {
+        let (args1, hlir_match1) = Add::default().sort().new_call();
+        let metal_op1 = self.sort().call(&args1);
+        let dt = v("?__dt");
+
+        let (args2, hlir_match2) = Add::default().sort().new_call();
+        let metal_op2 = self.sort().call(&args2);
+
         vec![
-            r#"(rule
-            ((= ?e (Add ?shape ?a ?a_stride ?b ?b_stride ?out_stride))
-             (= ?dt (dtype ?a)))
-            ((let ?me (MetalAdd ?shape ?a ?a_stride ?b ?b_stride ?out_stride))
-             (union ?e ?me)
-             (set (dtype ?me) ?dt))
-            :name "metal MetalAdd"
-        )"#
-            .to_string(),
-            r#"(rule
-                ((= ?e (Add ?shape ?a ?a_stride ?b ?b_stride ?out_stride)))
-                ((let ?me (MetalAdd ?shape ?a ?a_stride ?b ?b_stride ?out_stride))
-                 (union ?e ?me)
-                 (set (dtype ?me) (F32)))
-                :name "metal MetalAdd (no dtype)"
-            )"#
-            .to_string(),
+            rule([
+                union(hlir_match1, metal_op1.clone()),
+                set(dtype(metal_op1), dt.clone()),
+            ])
+            .fact(eq(dt, dtype(args1["inp_a"].clone()))),
+            rule([
+                union(hlir_match2, metal_op2.clone()),
+                set(dtype(metal_op2), app(&SORTS.f32_dt, vec![])),
+            ]),
         ]
     }
 
@@ -407,23 +408,19 @@ pub struct MetalMul {
 }
 
 impl EgglogOp for MetalMul {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "MetalMul".to_string(),
-            vec![EList, Input, EList, Input, EList, EList],
-        )
+    fn sort(&self) -> SortDef {
+        OP_SORTS.binary("MetalMul")
     }
 
-    fn rewrites(&self) -> Vec<String> {
-        vec![r#"(rule
-            ((= ?e (Mul ?shape ?a ?a_stride ?b ?b_stride ?out_stride))
-             (= ?dt (dtype ?a)))
-            ((let ?me (MetalMul ?shape ?a ?a_stride ?b ?b_stride ?out_stride))
-             (union ?e ?me)
-             (set (dtype ?me) ?dt))
-            :name "metal MetalMul"
-        )"#
-        .to_string()]
+    fn rewrites(&self) -> Vec<Rule> {
+        let (args, hlir_match) = Mul::default().sort().new_call();
+        let metal_op = self.sort().call(&args);
+        let dt = v("?__dt");
+        vec![rule([
+            union(hlir_match, metal_op.clone()),
+            set(dtype(metal_op), dt.clone()),
+        ])
+        .fact(eq(dt, dtype(args["inp_a"].clone())))]
     }
 
     fn cleanup(&self) -> bool {
@@ -531,23 +528,19 @@ pub struct MetalMod {
 }
 
 impl EgglogOp for MetalMod {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "MetalMod".to_string(),
-            vec![EList, Input, EList, Input, EList, EList],
-        )
+    fn sort(&self) -> SortDef {
+        OP_SORTS.binary("MetalMod")
     }
 
-    fn rewrites(&self) -> Vec<String> {
-        vec![r#"(rule
-            ((= ?e (Mod ?shape ?a ?a_stride ?b ?b_stride ?out_stride))
-             (= ?dt (dtype ?a)))
-            ((let ?me (MetalMod ?shape ?a ?a_stride ?b ?b_stride ?out_stride))
-             (union ?e ?me)
-             (set (dtype ?me) ?dt))
-            :name "metal MetalMod"
-        )"#
-        .to_string()]
+    fn rewrites(&self) -> Vec<Rule> {
+        let (args, hlir_match) = Mod::default().sort().new_call();
+        let metal_op = self.sort().call(&args);
+        let dt = v("?__dt");
+        vec![rule([
+            union(hlir_match, metal_op.clone()),
+            set(dtype(metal_op), dt.clone()),
+        ])
+        .fact(eq(dt, dtype(args["inp_a"].clone())))]
     }
 
     fn cleanup(&self) -> bool {
@@ -655,23 +648,19 @@ pub struct MetalLessThan {
 }
 
 impl EgglogOp for MetalLessThan {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "MetalLessThan".to_string(),
-            vec![EList, Input, EList, Input, EList, EList],
-        )
+    fn sort(&self) -> SortDef {
+        OP_SORTS.binary("MetalLessThan")
     }
 
-    fn rewrites(&self) -> Vec<String> {
-        vec![r#"(rule
-            ((= ?e (LessThan ?shape ?a ?a_stride ?b ?b_stride ?out_stride))
-             (= ?dt (dtype ?a)))
-            ((let ?me (MetalLessThan ?shape ?a ?a_stride ?b ?b_stride ?out_stride))
-             (union ?e ?me)
-             (set (dtype ?me) ?dt))
-            :name "metal MetalLessThan"
-        )"#
-        .to_string()]
+    fn rewrites(&self) -> Vec<Rule> {
+        let (args, hlir_match) = LessThan::default().sort().new_call();
+        let metal_op = self.sort().call(&args);
+        let dt = v("?__dt");
+        vec![rule([
+            union(hlir_match, metal_op.clone()),
+            set(dtype(metal_op), dt.clone()),
+        ])
+        .fact(eq(dt, dtype(args["inp_a"].clone())))]
     }
 
     fn cleanup(&self) -> bool {
@@ -783,23 +772,19 @@ pub struct MetalSumReduce {
 }
 
 impl EgglogOp for MetalSumReduce {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "MetalSum".to_string(),
-            vec![EList, Expr, Input, EList, Expr, EList],
-        )
+    fn sort(&self) -> SortDef {
+        OP_SORTS.reduce("MetalSum")
     }
 
-    fn rewrites(&self) -> Vec<String> {
-        vec![r#"(rule
-            ((= ?e (Sum ?out_shape ?iters ?inp ?in_stride ?iter_stride ?out_stride))
-             (= ?dt (dtype ?inp)))
-            ((let ?me (MetalSum ?out_shape ?iters ?inp ?in_stride ?iter_stride ?out_stride))
-             (union ?e ?me)
-             (set (dtype ?me) ?dt))
-            :name "metal MetalSum"
-        )"#
-        .to_string()]
+    fn rewrites(&self) -> Vec<Rule> {
+        let (args, hlir_match) = SumReduce::default().sort().new_call();
+        let metal_op = self.sort().call(&args);
+        let dt = v("?__dt");
+        vec![rule([
+            union(hlir_match, metal_op.clone()),
+            set(dtype(metal_op), dt.clone()),
+        ])
+        .fact(eq(dt, dtype(args["inp"].clone())))]
     }
 
     fn cleanup(&self) -> bool {
@@ -942,23 +927,19 @@ pub struct MetalMaxReduce {
 }
 
 impl EgglogOp for MetalMaxReduce {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "MetalMax".to_string(),
-            vec![EList, Expr, Input, EList, Expr, EList],
-        )
+    fn sort(&self) -> SortDef {
+        OP_SORTS.reduce("MetalMax")
     }
 
-    fn rewrites(&self) -> Vec<String> {
-        vec![r#"(rule
-            ((= ?e (Max ?out_shape ?iters ?inp ?in_stride ?iter_stride ?out_stride))
-             (= ?dt (dtype ?inp)))
-            ((let ?me (MetalMax ?out_shape ?iters ?inp ?in_stride ?iter_stride ?out_stride))
-             (union ?e ?me)
-             (set (dtype ?me) ?dt))
-            :name "metal MetalMax"
-        )"#
-        .to_string()]
+    fn rewrites(&self) -> Vec<Rule> {
+        let (args, hlir_match) = MaxReduce::default().sort().new_call();
+        let metal_op = self.sort().call(&args);
+        let dt = v("?__dt");
+        vec![rule([
+            union(hlir_match, metal_op.clone()),
+            set(dtype(metal_op), dt.clone()),
+        ])
+        .fact(eq(dt, dtype(args["inp"].clone())))]
     }
 
     fn cleanup(&self) -> bool {
@@ -1102,19 +1083,17 @@ pub struct MetalConstant {
 }
 
 impl EgglogOp for MetalConstant {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        ("MetalConstant".to_string(), vec![Float])
+    fn sort(&self) -> SortDef {
+        sort(IR, "MetalConstant", &[("value", F64)])
     }
 
-    fn rewrites(&self) -> Vec<String> {
-        vec![r#"(rule
-            ((= ?e (Constant ?f)))
-            ((let ?me (MetalConstant ?f))
-             (union ?e ?me)
-             (set (dtype ?me) (F32)))
-            :name "metal MetalConstant"
-        )"#
-        .to_string()]
+    fn rewrites(&self) -> Vec<Rule> {
+        let (args, const_match) = Constant::default().sort().new_call();
+        let metal_op = self.sort().call(&args);
+        vec![rule([
+            union(const_match, metal_op.clone()),
+            set(dtype(metal_op), app(&SORTS.f32_dt, vec![])),
+        ])]
     }
 
     fn cleanup(&self) -> bool {
@@ -1200,19 +1179,21 @@ pub struct MetalIota {
 }
 
 impl EgglogOp for MetalIota {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        ("MetalIota".to_string(), vec![Expr, Expr])
+    fn sort(&self) -> SortDef {
+        sort(
+            IR,
+            "MetalIota",
+            &[("expr", EXPRESSION), ("range", EXPRESSION)],
+        )
     }
 
-    fn rewrites(&self) -> Vec<String> {
-        vec![r#"(rule
-            ((= ?e (Iota ?expr ?range)))
-            ((let ?me (MetalIota ?expr ?range))
-             (union ?e ?me)
-             (set (dtype ?me) (Int)))
-            :name "metal MetalIota"
-        )"#
-        .to_string()]
+    fn rewrites(&self) -> Vec<Rule> {
+        let (args, iota_match) = Iota::default().sort().new_call();
+        let metal_op = self.sort().call(&args);
+        vec![rule([
+            union(iota_match, metal_op.clone()),
+            set(dtype(metal_op), app(&SORTS.int_dt, vec![])),
+        ])]
     }
 
     fn cleanup(&self) -> bool {
@@ -1302,24 +1283,47 @@ pub struct MetalGather {
 }
 
 impl EgglogOp for MetalGather {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        (
-            "MetalGather".to_string(),
-            vec![EList, Input, EList, Input, EList, EList],
+    fn sort(&self) -> SortDef {
+        sort(
+            IR,
+            "MetalGather",
+            &[
+                ("out_shape", ELIST),
+                ("indexes", IR),
+                ("index_strides", ELIST),
+                ("data", IR),
+                ("data_strides", ELIST),
+                ("out_strides", ELIST),
+            ],
         )
     }
 
-    fn rewrites(&self) -> Vec<String> {
-        vec![r#"(rule
-            ((= ?a (Gather ?indexes ?out_shape ?index_strides ?data ?data_shape ?data_strides))
-             (= ?dty (dtype ?data)))
-            ((let ?out_strides (RowMajor ?out_shape))
-             (let ?me (MetalGather ?out_shape ?indexes ?index_strides ?data ?data_strides ?out_strides))
-             (union ?a ?me)
-             (set (dtype ?me) ?dty))
-            :name "metal MetalGather"
-        )"#
-        .to_string()]
+    fn rewrites(&self) -> Vec<Rule> {
+        let (gather_args, gather_match) = Gather::default().sort().new_call();
+        let out_strides = SORTS
+            .row_major
+            .call([("list".to_string(), gather_args["index_shape"].clone())]);
+        let dt = v("?__dt");
+        let metal_args = [
+            ("out_shape".to_string(), gather_args["index_shape"].clone()),
+            ("indexes".to_string(), gather_args["indexes"].clone()),
+            (
+                "index_strides".to_string(),
+                gather_args["index_strides"].clone(),
+            ),
+            ("data".to_string(), gather_args["data"].clone()),
+            (
+                "data_strides".to_string(),
+                gather_args["data_strides"].clone(),
+            ),
+            ("out_strides".to_string(), out_strides),
+        ];
+        let metal_op = self.sort().call(metal_args);
+        vec![rule([
+            union(gather_match, metal_op.clone()),
+            set(dtype(metal_op), dt.clone()),
+        ])
+        .fact(eq(dt, dtype(gather_args["data"].clone())))]
     }
 
     fn cleanup(&self) -> bool {
@@ -1452,19 +1456,21 @@ pub struct MetalCast {
 }
 
 impl EgglogOp for MetalCast {
-    fn term(&self) -> (String, Vec<OpParam>) {
-        ("MetalCast".to_string(), vec![Input, Expr, Dty])
+    fn sort(&self) -> SortDef {
+        sort(
+            IR,
+            "MetalCast",
+            &[("inp", IR), ("size", EXPRESSION), ("dtype", DTYPE)],
+        )
     }
 
-    fn rewrites(&self) -> Vec<String> {
-        vec![r#"(rule
-            ((= ?e (Cast ?inp ?size ?dty)))
-            ((let ?me (MetalCast ?inp ?size ?dty))
-             (union ?e ?me)
-             (set (dtype ?me) ?dty))
-            :name "metal MetalCast"
-        )"#
-        .to_string()]
+    fn rewrites(&self) -> Vec<Rule> {
+        let (args, cast_match) = Cast::default().sort().new_call();
+        let metal_op = self.sort().call(&args);
+        vec![rule([
+            union(cast_match, metal_op.clone()),
+            set(dtype(metal_op), args["dtype"].clone()),
+        ])]
     }
 
     fn cleanup(&self) -> bool {
