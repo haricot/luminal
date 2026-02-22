@@ -231,6 +231,8 @@ pub struct BaseSorts {
     pub bf16_dt: SortDef,
     pub int_dt: SortDef,
     pub bool_dt: SortDef,
+    pub nvfp4_dt: SortDef,
+    pub mxfp4_dt: SortDef,
 
     // Egglog builtin primitives (for term construction only)
     pub p_add: SortDef,
@@ -310,6 +312,8 @@ impl BaseSorts {
             bf16_dt: sort(DTYPE, "Bf16", &[]),
             int_dt: sort(DTYPE, "Int", &[]),
             bool_dt: sort(DTYPE, "Bool", &[]),
+            nvfp4_dt: sort(DTYPE, "NvFp4", &[]),
+            mxfp4_dt: sort(DTYPE, "Mxfp4", &[]),
 
             p_add: func("+", &["a", "b"]),
             p_sub: func("-", &["a", "b"]),
@@ -364,6 +368,8 @@ impl BaseSorts {
             &self.bf16_dt,
             &self.int_dt,
             &self.bool_dt,
+            &self.nvfp4_dt,
+            &self.mxfp4_dt,
         ] {
             p.add_sort(s);
         }
