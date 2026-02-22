@@ -852,8 +852,10 @@ impl EgglogOp for KernelGather {
             ("out_strides".to_string(), out_strides),
             ("dtype".to_string(), dt.clone()),
         ];
-        vec![rule(union(gather_match, self.sort().call(kernel_args)))
-            .fact(eq(dt, dtype(gather_args["data"].clone())))]
+        vec![
+            rule(union(gather_match, self.sort().call(kernel_args)))
+                .fact(eq(dt, dtype(gather_args["data"].clone()))),
+        ]
     }
 
     fn cleanup(&self) -> bool {
@@ -2298,8 +2300,10 @@ impl EgglogOp for KernelCast {
         let in_dty = v("?__in_dt");
         args.add("dtype", in_dty.clone());
         args.add("src_dtype", out_dty);
-        vec![rule(union(cast_match, self.sort().call(&args)))
-            .fact(eq(in_dty, dtype(args["inp"].clone())))]
+        vec![
+            rule(union(cast_match, self.sort().call(&args)))
+                .fact(eq(in_dty, dtype(args["inp"].clone()))),
+        ]
     }
 
     fn cleanup(&self) -> bool {
