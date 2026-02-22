@@ -5,7 +5,7 @@ use crate::{hlir::Gather, prelude::*};
 impl GraphTensor {
     /// Swap dimensions of the tensor
     pub fn permute(mut self, axes: impl ToAxes) -> GraphTensor {
-        self.shape.permute(&axes.to_axes());
+        self.shape.permute(axes.to_axes());
         self
     }
 
@@ -334,12 +334,15 @@ impl GraphTensor {
             mask_expressions.push(mask);
         }
         let mask_expression = flatten_z_strides_mask(&new_dims, &mask_expressions);
-        let mask = self.graph().iota(mask_expression, new_dims);
+        let mask = self
+            .graph()
+            .iota(mask_expression, new_dims)
+            .cast(self.dtype);
         let masked = new_tensor * mask;
         if elem == 0.0 {
             masked
         } else {
-            masked + ((1. - mask) * elem)
+            masked + ((1.0 - mask) * elem)
         }
     }
 

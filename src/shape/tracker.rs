@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use itertools::Itertools;
 use rustc_hash::FxHashMap;
 use tinyvec::ArrayVec;
 
@@ -13,7 +14,12 @@ pub struct ShapeTracker {
 
 impl Display for ShapeTracker {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "sh{:?} st{:?}", self.dims, self.strides)
+        write!(
+            f,
+            "({}) : ({})",
+            self.dims.iter().map(|e| format!("{e}")).join(", "),
+            self.strides.iter().map(|e| format!("{e}")).join(", ")
+        )
     }
 }
 
@@ -121,7 +127,8 @@ impl ShapeTracker {
     }
 
     /// Permute the dimensions
-    pub fn permute(&mut self, axes: &[usize]) {
+    pub fn permute(&mut self, axes: impl ToAxes) {
+        let axes = axes.to_axes();
         assert!(
             axes.len() == self.len(),
             "Permute axes ({}) doesn't match shape axes ({})",
@@ -305,7 +312,7 @@ mod tests {
                     Expression::from(1)
                 ]
             );
-            tracker.permute(&[1, 2, 0]);
+            tracker.permute((1, 2, 0));
             assert_eq!(
                 tracker.dims.as_slice(),
                 &[
@@ -322,7 +329,6 @@ mod tests {
                     Expression::from(b * c)
                 ]
             );
-            assert!(!tracker.is_contiguous());
             tracker.expand_dim(1, 1);
             assert_eq!(
                 tracker.dims.as_slice(),
