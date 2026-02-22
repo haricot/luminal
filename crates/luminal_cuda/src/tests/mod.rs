@@ -4,3 +4,5 @@ pub mod utilities;
 mod op_functional_tests;
 #[cfg(test)]
 mod performance_tests;
+#[cfg(test)]
+mod transformer;
