@@ -142,6 +142,7 @@ mod tests {
     }
 
     /// Reference MoE for batched input [batch, in_dim]
+    #[allow(clippy::too_many_arguments)]
     fn moe_reference_batch(
         input: &[f32],
         router: &[f32],
