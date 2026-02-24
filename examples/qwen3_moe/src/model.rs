@@ -77,14 +77,18 @@ impl Qwen3MoE {
                         format!("model.layers.{l}.mlp.gate.weight"),
                         (NUM_EXPERTS, HIDDEN),
                     ),
-                    gate_up_weights: cx.named_tensor(
-                        format!("model.layers.{l}.mlp.gate_up_weights"),
-                        (NUM_EXPERTS, MOE_INTERMEDIATE * 2, HIDDEN),
-                    ).as_dtype(DType::Bf16),
-                    down_weights: cx.named_tensor(
-                        format!("model.layers.{l}.mlp.down_weights"),
-                        (NUM_EXPERTS, HIDDEN, MOE_INTERMEDIATE),
-                    ).as_dtype(DType::Bf16),
+                    gate_up_weights: cx
+                        .named_tensor(
+                            format!("model.layers.{l}.mlp.gate_up_weights"),
+                            (NUM_EXPERTS, MOE_INTERMEDIATE * 2, HIDDEN),
+                        )
+                        .as_dtype(DType::Bf16),
+                    down_weights: cx
+                        .named_tensor(
+                            format!("model.layers.{l}.mlp.down_weights"),
+                            (NUM_EXPERTS, HIDDEN, MOE_INTERMEDIATE),
+                        )
+                        .as_dtype(DType::Bf16),
                 },
             });
         }
@@ -187,7 +191,6 @@ impl Qwen3MoELayer {
         let mlp_out = self.moe.forward(x_mlp);
         x + mlp_out
     }
-
 }
 
 impl QwenMoE {
@@ -216,9 +219,7 @@ impl QwenMoE {
         let gate_up_gathered =
             gather_experts(x, top_k_indices, self.gate_up_weights).cast(DType::F32);
         let x_exp = x.expand_dim(n - 1, TOP_K).unsqueeze(n); // [s, k, 1, H]
-        let gate_up_out = x_exp
-            .matmul(gate_up_gathered.transpose(2, 3))
-            .squeeze(n); // [s, k, intermediate*2]
+        let gate_up_out = x_exp.matmul(gate_up_gathered.transpose(2, 3)).squeeze(n); // [s, k, intermediate*2]
 
         // 5. SwiGLU: silu(gate) * up → [s, k, intermediate]
         let gate = gate_up_out.slice((.., .., ..MOE_INTERMEDIATE));
@@ -228,12 +229,9 @@ impl QwenMoE {
         // 6. Gather down expert weights → [s, k, H, intermediate]
         //    Transpose last two dims → [s, k, intermediate, H]
         //    Batched matmul: [s,k,1,intermediate] @ [s,k,intermediate,H] → [s,k,1,H]
-        let down_gathered =
-            gather_experts(x, top_k_indices, self.down_weights).cast(DType::F32);
+        let down_gathered = gather_experts(x, top_k_indices, self.down_weights).cast(DType::F32);
         let hidden_exp = hidden.unsqueeze(2); // [s, k, 1, intermediate]
-        let down_out = hidden_exp
-            .matmul(down_gathered.transpose(2, 3))
-            .squeeze(2); // [s, k, H]
+        let down_out = hidden_exp.matmul(down_gathered.transpose(2, 3)).squeeze(2); // [s, k, H]
 
         // 7. Weighted sum over k experts → [s, H]
         let weights_exp = top_k_values.unsqueeze(top_k_values.dims().len()); // [s, k, 1]

@@ -18,20 +18,19 @@ use crate::{
             CudaBlasLT, MatmulShared,
             sys::{
                 cublasComputeType_t, cublasLtMatmul, cublasLtMatmulAlgoGetHeuristic,
-                cublasLtMatmulDesc_t, cublasLtMatmulDescCreate, cublasLtMatmulDescDestroy,
-                cublasLtMatmulDescSetAttribute, cublasLtMatmulHeuristicResult_t,
-                cublasLtMatmulPreference_t, cublasLtMatmulPreferenceAttributes_t,
-                cublasLtMatmulPreferenceCreate, cublasLtMatmulPreferenceDestroy,
-                cublasLtMatmulPreferenceSetAttribute, cublasLtMatrixLayout_t,
-                cublasLtMatrixLayoutCreate, cublasLtMatrixLayoutDestroy,
-                cudaDataType, cublasLtMatmulDescAttributes_t,
+                cublasLtMatmulDesc_t, cublasLtMatmulDescAttributes_t, cublasLtMatmulDescCreate,
+                cublasLtMatmulDescDestroy, cublasLtMatmulDescSetAttribute,
+                cublasLtMatmulHeuristicResult_t, cublasLtMatmulPreference_t,
+                cublasLtMatmulPreferenceAttributes_t, cublasLtMatmulPreferenceCreate,
+                cublasLtMatmulPreferenceDestroy, cublasLtMatmulPreferenceSetAttribute,
+                cublasLtMatrixLayout_t, cublasLtMatrixLayoutCreate, cublasLtMatrixLayoutDestroy,
+                cudaDataType,
             },
         },
         driver::{
-            CudaFunction, CudaModule, CudaSlice, CudaStream, DevicePtr, LaunchConfig,
-            PushKernelArg,
+            CudaFunction, CudaModule, CudaSlice, CudaStream, DevicePtr, LaunchConfig, PushKernelArg,
         },
-        nvrtc::{compile_ptx_with_opts, CompileOptions},
+        nvrtc::{CompileOptions, compile_ptx_with_opts},
     },
     host::HostOp,
 };
@@ -293,7 +292,7 @@ impl HostOp for GLUMoE {
 
         // Cast x F32 → BF16
         let n_cast = (seq * hidden) as i32;
-        let blocks = ((n_cast as u32) + 255) / 256;
+        let blocks = (n_cast as u32).div_ceil(256);
         unsafe {
             stream
                 .launch_builder(f32_to_bf16_fn)
@@ -325,12 +324,10 @@ impl HostOp for GLUMoE {
 
         for t in 0..seq {
             let x_t_ptr = xbf16_ptr + (t * hidden * 2) as u64; // BF16
-            let expert_indices =
-                &topk_idx_i32[t * top_k..(t + 1) * top_k];
+            let expert_indices = &topk_idx_i32[t * top_k..(t + 1) * top_k];
             let weights = &normalized_vals[t * top_k..(t + 1) * top_k];
 
-            for (i, (&expert_idx, &weight)) in
-                expert_indices.iter().zip(weights.iter()).enumerate()
+            for (i, (&expert_idx, &weight)) in expert_indices.iter().zip(weights.iter()).enumerate()
             {
                 let expert_idx = expert_idx as usize;
 
@@ -359,7 +356,7 @@ impl HostOp for GLUMoE {
 
                 // b. SwiGLU kernel (BF16 → BF16)
                 let moe_int = intermediate as i32;
-                let swiglu_blocks = ((moe_int as u32) + 255) / 256;
+                let swiglu_blocks = (moe_int as u32).div_ceil(256);
                 unsafe {
                     stream
                         .launch_builder(swiglu_fn)
@@ -425,7 +422,7 @@ impl HostOp for GLUMoE {
 
 fn buf_ptr(buf: &CudaSlice<u8>, stream: &Arc<CudaStream>) -> u64 {
     let (ptr, _guard) = buf.device_ptr(stream);
-    ptr as u64
+    ptr
 }
 
 #[allow(clippy::too_many_arguments)]

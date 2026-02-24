@@ -146,9 +146,7 @@ impl CudaRuntime {
                         let dev = f32s.to_cuda_input(&self.cuda_stream);
                         self.hlir_buffers.insert(node, dev);
                     }
-                    safetensors::Dtype::U8
-                    | safetensors::Dtype::BF16
-                    | safetensors::Dtype::F16 => {
+                    safetensors::Dtype::U8 | safetensors::Dtype::BF16 | safetensors::Dtype::F16 => {
                         let bytes = tensor.data();
                         let dev = bytes.to_cuda_input(&self.cuda_stream);
                         self.hlir_buffers.insert(node, dev);

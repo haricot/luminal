@@ -434,8 +434,12 @@ mod tests {
         // Input tensors
         let x = cx.tensor(('s', hidden));
         let router = cx.tensor((n_experts, hidden));
-        let gate_up_weights = cx.tensor((n_experts, intermediate * 2, hidden)).as_dtype(DType::Bf16);
-        let down_weights = cx.tensor((n_experts, hidden, intermediate)).as_dtype(DType::Bf16);
+        let gate_up_weights = cx
+            .tensor((n_experts, intermediate * 2, hidden))
+            .as_dtype(DType::Bf16);
+        let down_weights = cx
+            .tensor((n_experts, hidden, intermediate))
+            .as_dtype(DType::Bf16);
 
         let n = x.dims().len(); // 2
         let e_dim = *router.dims().first().unwrap(); // E
@@ -457,11 +461,10 @@ mod tests {
         let top_k_values = routing_weights.gather(routing_flat_idx);
 
         // 4. Gather gate_up expert weights → [s, k, intermediate*2, H]
-        let gate_up_gathered = gather_experts_test(x, top_k_indices, gate_up_weights).cast(DType::F32);
+        let gate_up_gathered =
+            gather_experts_test(x, top_k_indices, gate_up_weights).cast(DType::F32);
         let x_exp = x.expand_dim(n - 1, top_k).unsqueeze(n); // [s, k, 1, H]
-        let gate_up_out = x_exp
-            .matmul(gate_up_gathered.transpose(2, 3))
-            .squeeze(n); // [s, k, intermediate*2]
+        let gate_up_out = x_exp.matmul(gate_up_gathered.transpose(2, 3)).squeeze(n); // [s, k, intermediate*2]
 
         // 5. SwiGLU: silu(gate) * up → [s, k, intermediate]
         let gate = gate_up_out.slice((.., .., ..intermediate));
@@ -471,9 +474,7 @@ mod tests {
         // 6. Gather down expert weights → [s, k, H, intermediate]
         let down_gathered = gather_experts_test(x, top_k_indices, down_weights).cast(DType::F32);
         let hidden_exp = hidden_act.unsqueeze(2); // [s, k, 1, intermediate]
-        let down_out = hidden_exp
-            .matmul(down_gathered.transpose(2, 3))
-            .squeeze(2); // [s, k, H]
+        let down_out = hidden_exp.matmul(down_gathered.transpose(2, 3)).squeeze(2); // [s, k, H]
 
         // 7. Weighted sum over k experts → [s, H]
         let weights_exp = top_k_values.unsqueeze(top_k_values.dims().len()); // [s, k, 1]

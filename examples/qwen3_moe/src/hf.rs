@@ -76,15 +76,15 @@ fn tensor_to_f32_bytes(tensor: &safetensors::tensor::TensorView) -> Vec<u8> {
 
 /// Check if a tensor name is an expert weight (large, should be stored as BF16)
 fn is_expert_weight(name: &str) -> bool {
-    name.contains(".mlp.experts.") || name.contains(".mlp.gate_up_weights") || name.contains(".mlp.down_weights")
+    name.contains(".mlp.experts.")
+        || name.contains(".mlp.gate_up_weights")
+        || name.contains(".mlp.down_weights")
 }
 
 /// Combines sharded safetensors files into a single mixed-precision file.
 ///
 /// Expert weights are stored as BF16 (saves ~60GB), non-expert weights as F32 (~6GB).
-pub fn combine_safetensors(
-    model_dir: &Path,
-) -> Result<PathBuf, Box<dyn std::error::Error>> {
+pub fn combine_safetensors(model_dir: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let output_path = model_dir.join("model_combined.safetensors");
 
     // Skip if already combined
@@ -135,21 +135,39 @@ pub fn combine_safetensors(
                     Dtype::BF16 => tensor.data().to_vec(),
                     Dtype::F16 => {
                         let f16_slice: &[f16] = bytemuck::cast_slice(tensor.data());
-                        let bf16_data: Vec<bf16> = f16_slice.iter().map(|x| bf16::from_f32(x.to_f32())).collect();
+                        let bf16_data: Vec<bf16> = f16_slice
+                            .iter()
+                            .map(|x| bf16::from_f32(x.to_f32()))
+                            .collect();
                         bytemuck::cast_slice(&bf16_data).to_vec()
                     }
                     Dtype::F32 => {
                         let f32_slice: &[f32] = bytemuck::cast_slice(tensor.data());
-                        let bf16_data: Vec<bf16> = f32_slice.iter().map(|x| bf16::from_f32(*x)).collect();
+                        let bf16_data: Vec<bf16> =
+                            f32_slice.iter().map(|x| bf16::from_f32(*x)).collect();
                         bytemuck::cast_slice(&bf16_data).to_vec()
                     }
                     other => panic!("Unsupported dtype: {other:?}"),
                 };
-                all_tensors.insert(name.to_string(), StoredTensor { shape, data, dtype: Dtype::BF16 });
+                all_tensors.insert(
+                    name.to_string(),
+                    StoredTensor {
+                        shape,
+                        data,
+                        dtype: Dtype::BF16,
+                    },
+                );
             } else {
                 // Non-expert weights as F32
                 let data = tensor_to_f32_bytes(&tensor);
-                all_tensors.insert(name.to_string(), StoredTensor { shape, data, dtype: Dtype::F32 });
+                all_tensors.insert(
+                    name.to_string(),
+                    StoredTensor {
+                        shape,
+                        data,
+                        dtype: Dtype::F32,
+                    },
+                );
             }
         }
     }
@@ -174,8 +192,16 @@ pub fn combine_safetensors(
             let up = all_tensors
                 .remove(&up_key)
                 .unwrap_or_else(|| panic!("Missing tensor: {up_key}"));
-            assert_eq!(gate.data.len(), gate_size_bf16, "gate_proj size mismatch layer {l} expert {e}");
-            assert_eq!(up.data.len(), gate_size_bf16, "up_proj size mismatch layer {l} expert {e}");
+            assert_eq!(
+                gate.data.len(),
+                gate_size_bf16,
+                "gate_proj size mismatch layer {l} expert {e}"
+            );
+            assert_eq!(
+                up.data.len(),
+                gate_size_bf16,
+                "up_proj size mismatch layer {l} expert {e}"
+            );
             // Concatenate: gate first, then up
             gate_up_data.extend_from_slice(&gate.data);
             gate_up_data.extend_from_slice(&up.data);
@@ -196,7 +222,11 @@ pub fn combine_safetensors(
             let tensor = all_tensors
                 .remove(&key)
                 .unwrap_or_else(|| panic!("Missing tensor: {key}"));
-            assert_eq!(tensor.data.len(), down_size_bf16, "down_proj size mismatch layer {l} expert {e}");
+            assert_eq!(
+                tensor.data.len(),
+                down_size_bf16,
+                "down_proj size mismatch layer {l} expert {e}"
+            );
             down_data.extend_from_slice(&tensor.data);
         }
         all_tensors.insert(
