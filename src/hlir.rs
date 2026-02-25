@@ -350,9 +350,11 @@ impl EgglogOp for Iota {
 impl NativeOp for Iota {
     fn execute(&self, _: Vec<&NativeData>, dyn_map: &FxHashMap<char, usize>) -> NativeData {
         let length = self.1.exec(dyn_map).unwrap();
+        let mut expr = self.0;
+        expr.resolve_vars(dyn_map);
         NativeData::Int(
             (0..length)
-                .map(|i| self.0.exec_single_var(i) as i32)
+                .map(|i| expr.exec_single_var(i) as i32)
                 .collect(),
         )
     }
@@ -809,9 +811,25 @@ fn bin_fn<A: Copy>(
     b_get: impl Fn(&NativeData, usize) -> A,
     op: impl Fn(A, A) -> A,
 ) -> Vec<A> {
+    let a_shape = a_ind.shape.clone();
+    let a_strides = a_ind.strides.clone();
+    let b_shape = b_ind.shape.clone();
+    let b_strides = b_ind.strides.clone();
     a_ind
         .zip(b_ind)
-        .map(|(i, j)| op(a[i], b_get(b, j)))
+        .map(|(i, j)| {
+            assert!(
+                i < a.len(),
+                "bin_fn: a index {i} out of bounds (a.len={}), shape={a_shape:?}, strides={a_strides:?}",
+                a.len(),
+            );
+            assert!(
+                j < b.len(),
+                "bin_fn: b index {j} out of bounds (b.len={}), shape={b_shape:?}, strides={b_strides:?}",
+                b.len(),
+            );
+            op(a[i], b_get(b, j))
+        })
         .collect()
 }
 
@@ -1429,7 +1447,7 @@ impl NativeOp for MaxReduce {
     }
 }
 
-pub trait NativeOp: Debug + AsAny {
+pub trait NativeOp: Debug + AsAny + Send + Sync {
     fn execute(&self, inputs: Vec<&NativeData>, dyn_map: &FxHashMap<char, usize>) -> NativeData;
 }
 
@@ -1443,6 +1461,18 @@ pub enum NativeData {
 }
 
 impl NativeData {
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    pub fn len(&self) -> usize {
+        match self {
+            NativeData::F32(v) => v.len(),
+            NativeData::F16(v) => v.len(),
+            NativeData::Bf16(v) => v.len(),
+            NativeData::Int(v) => v.len(),
+            NativeData::Bool(v) => v.len(),
+        }
+    }
     #[inline]
     pub fn f32(&self, i: usize) -> f32 {
         match self {
