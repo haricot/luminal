@@ -1,7 +1,7 @@
 use generational_box::{AnyStorage, GenerationalBox, Owner, SyncStorage};
 use lru::LruCache;
 use rustc_hash::FxHashMap;
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{
     fmt::Debug,
     hash::Hash,
@@ -36,6 +36,16 @@ impl Serialize for Expression {
     {
         // Access the Vec<Term> inside the GenerationalBox and serialize it
         self.terms.read().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Expression {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let terms = Vec::<Term>::deserialize(deserializer)?;
+        Ok(Expression::new(terms))
     }
 }
 
@@ -128,7 +138,7 @@ impl Default for Expression {
 }
 
 /// A single term of a symbolic expression such as a variable, number or operation.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Term {
     Num(i32),
     Var(char),
@@ -488,6 +498,22 @@ impl Expression {
     pub fn exec_single_var(&self, value: usize) -> usize {
         let mut stack = Vec::new();
         self.exec_single_var_stack(value, &mut stack)
+    }
+    /// Evaluate the expression with one value for all variables, returning None on failure.
+    pub fn exec_single_var_checked(&self, value: usize) -> Option<usize> {
+        let mut stack = Vec::new();
+        for term in self.terms.read().iter() {
+            match term {
+                Term::Num(n) => stack.push(*n as i64),
+                Term::Var(_) => stack.push(value as i64),
+                _ => {
+                    let a = stack.pop()?;
+                    let b = stack.pop()?;
+                    stack.push(term.as_op()?(a, b)?);
+                }
+            }
+        }
+        Some(stack.pop()? as usize)
     }
     /// Evaluate the expression with one value for all variables. Uses a provided stack
     pub fn exec_single_var_stack(&self, value: usize, stack: &mut Vec<i64>) -> usize {

@@ -158,7 +158,7 @@ pub trait CustomOp: Debug {
 }
 
 /// Supported dtypes
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub enum DType {
     /// 32-bit float (8e23m)
     #[default]
