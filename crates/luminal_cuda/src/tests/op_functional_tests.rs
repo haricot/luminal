@@ -176,8 +176,8 @@ fn run_argsort_test(rows: usize, cols: usize, seed: u64) {
 
     let mut cx = Graph::default();
     let input = cx.tensor((rows, cols));
-    let sorted_dim0 = input.argsort(0, true).output(); // descend
-    let sorted_dim1 = input.argsort(1, false).output(); // ascend
+    let sorted_dim0 = input.stable_argsort(0, true).output(); // descend
+    let sorted_dim1 = input.stable_argsort(1, false).output(); // ascend
 
     // random and unique data using seed
     let data: Vec<f32> = random_f32_vec(total, seed, 0.0, 1.0);
