@@ -86,7 +86,11 @@ struct PendingTimingData {
 
 pub struct CudaRuntime {
     pub hlir_buffers: FxHashMap<NodeIndex, CudaInput>,
-    pub buffers: FxHashMap<NodeIndex, CudaSlice<u8>>,
+    /// Pool of actual GPU buffer allocations. Multiple nodes may share a pool entry
+    /// when their lifetimes don't overlap, reducing peak VRAM usage.
+    pub buffer_pool: Vec<CudaSlice<u8>>,
+    /// Maps each llir_graph node to its assigned buffer pool index.
+    buffer_node_to_pool: FxHashMap<NodeIndex, usize>,
     pub llir_graph: luminal::graph::LLIRGraph,
     cuda_stream: Arc<CudaStream>,
     timing_stream: Arc<CudaStream>,
@@ -187,8 +191,7 @@ impl CudaRuntime {
         let _span = span!(Level::TRACE, "dtoh").entered();
         self.cuda_stream
             .clone_dtoh(
-                self.buffers
-                    .get(&data_id)
+                self.get_buffer(&data_id)
                     .expect("Cannot find tensor in runtime!"),
             )
             .unwrap()
@@ -235,50 +238,125 @@ impl CudaRuntime {
         unsafe { Vec::from_raw_parts(bf16_ptr, n_bytes / 2, n_bytes / 2) }
     }
 
+    /// Look up a buffer for the given llir_graph node via the buffer pool.
+    fn get_buffer(&self, node: &NodeIndex) -> Option<&CudaSlice<u8>> {
+        self.buffer_node_to_pool
+            .get(node)
+            .map(|&idx| &self.buffer_pool[idx])
+    }
+
+    /// Allocate intermediate buffers with liveness-based reuse to reduce peak VRAM.
+    ///
+    /// This performs a liveness analysis using the exec_graph topology to determine
+    /// when each buffer is first and last needed. Buffers with non-overlapping lifetimes
+    /// are assigned to the same pool entry, significantly reducing peak memory usage
+    /// on VRAM-constrained devices (e.g. 8 GB GPUs).
     #[tracing::instrument(skip_all)]
     fn allocate_intermediate_buffers(&mut self, dyn_dims: &FxHashMap<char, usize>) {
         self.intermediate_buffer_dims.clear();
+
+        // 1. Compute required buffer sizes for each llir_graph node
+        let mut node_sizes: Vec<(NodeIndex, usize)> = Vec::new();
         for node in self.llir_graph.node_indices().collect_vec() {
             if self.llir_graph[node].to_op::<Input>().is_some() {
                 continue;
             }
-            if let Some(op) = self.llir_graph[node].to_dialect::<dyn BlockOp>() {
+            let size = if let Some(op) = self.llir_graph[node].to_dialect::<dyn BlockOp>() {
                 let out_bytes = op.output_bytes();
-                let exec_size = out_bytes.exec(dyn_dims).unwrap();
-                // Skip allocation for ops with zero output size
-                if exec_size == 0 {
-                    continue;
-                }
-                self.intermediate_buffer_dims
-                    .extend(op.output_bytes().dyn_vars());
-                self.buffers.insert(
-                    node,
-                    self.cuda_stream
-                        .alloc_zeros(op.output_bytes().exec(dyn_dims).unwrap())
-                        .unwrap(),
-                );
-                let ptr = self.buffers[&node].device_ptr(&self.cuda_stream).0;
-                self.cached_buffer_ptrs.insert(node, ptr);
+                self.intermediate_buffer_dims.extend(out_bytes.dyn_vars());
+                out_bytes.exec(dyn_dims).unwrap()
             } else if let Some(op) = self.llir_graph[node].to_dialect::<dyn KernelOp>() {
                 let out_bytes = op.output_bytes();
-                let exec_bytes = out_bytes.exec(dyn_dims).unwrap();
-                if exec_bytes == 0 {
-                    continue;
-                }
                 self.intermediate_buffer_dims.extend(out_bytes.dyn_vars());
-                self.buffers
-                    .insert(node, self.cuda_stream.alloc_zeros(exec_bytes).unwrap());
-                let ptr = self.buffers[&node].device_ptr(&self.cuda_stream).0;
-                self.cached_buffer_ptrs.insert(node, ptr);
+                out_bytes.exec(dyn_dims).unwrap()
             } else if let Some(op) = self.llir_graph[node].to_dialect::<dyn HostOp>() {
-                let out_bytes = op.output_bytes().exec(dyn_dims).unwrap();
-                if out_bytes > 0 {
-                    self.buffers
-                        .insert(node, self.cuda_stream.alloc_zeros(out_bytes).unwrap());
-                    let ptr = self.buffers[&node].device_ptr(&self.cuda_stream).0;
-                    self.cached_buffer_ptrs.insert(node, ptr);
-                }
+                op.output_bytes().exec(dyn_dims).unwrap()
+            } else {
+                0
+            };
+            if size > 0 {
+                node_sizes.push((node, size));
             }
+        }
+
+        // 2. Compute live ranges from exec_graph topology.
+        //    live_range[llir_node] = (first_exec_pos, last_exec_pos)
+        let exec_topo = toposort(&self.exec_graph, None)
+            .expect("exec_graph contains a cycle; cannot compute buffer liveness");
+        let mut live_range: FxHashMap<NodeIndex, (usize, usize)> = FxHashMap::default();
+        for (pos, &exec_node) in exec_topo.iter().enumerate() {
+            let exec_op = &self.exec_graph[exec_node];
+            // Collect all llir nodes this exec op needs
+            let mut needed: Vec<NodeIndex> = Vec::new();
+            needed.push(exec_op.output);
+            needed.extend(exec_op.inputs.iter().copied());
+            needed.extend(exec_op.internal.extra_buffer_nodes());
+            for llir_node in needed {
+                live_range
+                    .entry(llir_node)
+                    .and_modify(|(first, last)| {
+                        *first = (*first).min(pos);
+                        *last = (*last).max(pos);
+                    })
+                    .or_insert((pos, pos));
+            }
+        }
+
+        // 3. Sort nodes by birth position for greedy allocation.
+        //    Nodes not referenced by any exec_graph op (orphaned) are sorted last
+        //    and get their own non-reusable allocations to preserve correctness.
+        node_sizes.sort_by_key(|(node, _)| live_range.get(node).map_or(usize::MAX, |lr| lr.0));
+
+        // 4. Greedy allocation with buffer reuse
+        //    free_list entries: (pool_size, pool_index)
+        let mut free_list: Vec<(usize, usize)> = Vec::new();
+        //    Tracks the death position for each currently-in-use pool entry
+        let mut pool_death: FxHashMap<usize, usize> = FxHashMap::default();
+
+        for (node, size) in node_sizes {
+            let birth = live_range.get(&node).map_or(usize::MAX, |lr| lr.0);
+
+            // Move pool entries whose last consumer is before this node's birth
+            // into the free list so they can be reused.
+            let newly_free: Vec<usize> = pool_death
+                .iter()
+                .filter(|&(_, death)| *death < birth)
+                .map(|(idx, _)| *idx)
+                .collect();
+            for idx in newly_free {
+                pool_death.remove(&idx);
+                let pool_size = self.buffer_pool[idx].len();
+                free_list.push((pool_size, idx));
+            }
+
+            // Find best-fit reusable buffer (smallest buffer >= required size)
+            let best_fit = free_list
+                .iter()
+                .enumerate()
+                .filter(|(_, (s, _))| *s >= size)
+                .min_by_key(|(_, (s, _))| *s);
+
+            let pool_idx = if let Some((free_idx, _)) = best_fit {
+                let (_, pool_idx) = free_list.swap_remove(free_idx);
+                pool_idx
+            } else {
+                // Allocate a new buffer in the pool
+                let buf = self.cuda_stream.alloc_zeros(size).unwrap();
+                let idx = self.buffer_pool.len();
+                self.buffer_pool.push(buf);
+                idx
+            };
+
+            self.buffer_node_to_pool.insert(node, pool_idx);
+            let ptr = self.buffer_pool[pool_idx].device_ptr(&self.cuda_stream).0;
+            self.cached_buffer_ptrs.insert(node, ptr);
+
+            // Update the death position for this pool entry
+            let death = live_range.get(&node).map_or(usize::MAX, |lr| lr.1);
+            pool_death
+                .entry(pool_idx)
+                .and_modify(|d| *d = (*d).max(death))
+                .or_insert(death);
         }
     }
 
@@ -287,7 +365,7 @@ impl CudaRuntime {
     #[tracing::instrument(skip_all)]
     pub fn prebuild_graphs(&mut self, dyn_map: &FxHashMap<char, usize>) {
         // 1. Allocate intermediate buffers (needed for buffer pointers)
-        if self.buffers.is_empty() {
+        if self.buffer_pool.is_empty() {
             self.last_dyn_map = dyn_map.clone();
             self.allocate_intermediate_buffers(dyn_map);
         }
@@ -442,7 +520,8 @@ impl Runtime for CudaRuntime {
         Self {
             num_sms,
             hlir_buffers: FxHashMap::default(),
-            buffers: FxHashMap::default(),
+            buffer_pool: Vec::new(),
+            buffer_node_to_pool: FxHashMap::default(),
             cuda_stream: stream,
             timing_stream,
             llir_graph: StableGraph::default(),
@@ -477,7 +556,8 @@ impl Runtime for CudaRuntime {
 
         // Clear intermediate buffers when loading new graph - they need to be
         // reallocated and re-registered with the new work_queue
-        self.buffers.clear();
+        self.buffer_pool.clear();
+        self.buffer_node_to_pool.clear();
         self.cached_buffer_ptrs.clear();
         // Mark all HLIR inputs as changed so their pointers get re-cached in execute
         self.changed_hlir.extend(self.hlir_buffers.keys().copied());
@@ -596,7 +676,8 @@ impl Runtime for CudaRuntime {
 
     fn clear_intermediate_buffers(&mut self) {
         self.cuda_stream.synchronize().unwrap();
-        self.buffers.clear();
+        self.buffer_pool.clear();
+        self.buffer_node_to_pool.clear();
         self.cached_buffer_ptrs.clear();
     }
 
@@ -607,7 +688,8 @@ impl Runtime for CudaRuntime {
         dyn_map: &FxHashMap<char, usize>,
         _trials: usize,
     ) -> (Self::ProfileMetric, String) {
-        self.buffers.clear();
+        self.buffer_pool.clear();
+        self.buffer_node_to_pool.clear();
         self.load_llir(llir_graph);
         let start = std::time::Instant::now();
         self.execute(dyn_map);
@@ -679,7 +761,7 @@ impl Runtime for CudaRuntime {
 
     #[tracing::instrument(skip_all)]
     fn execute(&mut self, dyn_map: &FxHashMap<char, usize>) -> Self::ExecReturn {
-        let buffers_empty = self.buffers.is_empty();
+        let buffers_empty = self.buffer_pool.is_empty();
         let dyn_map_len_changed = dyn_map.len() != self.last_dyn_map.len();
         let dyn_dims_changed = dyn_map
             .iter()
@@ -693,7 +775,7 @@ impl Runtime for CudaRuntime {
 
         // Always clear intermediate buffers to ensure correctness for operations using atomicAdd
         // TODO: this is very expensive. Need to eliminate ops that require zeroed outputs
-        for buffer in self.buffers.values_mut() {
+        for buffer in self.buffer_pool.iter_mut() {
             self.cuda_stream.memset_zeros(buffer).unwrap();
         }
         self.cuda_stream.synchronize().unwrap();
@@ -726,12 +808,12 @@ impl Runtime for CudaRuntime {
             // Build buffer map for the HostOp interface
             let mut buffer_map: FxHashMap<NodeIndex, &CudaSlice<u8>> = FxHashMap::default();
             // Add output buffer
-            if let Some(buf) = self.buffers.get(&exec_op.output) {
+            if let Some(buf) = self.get_buffer(&exec_op.output) {
                 buffer_map.insert(exec_op.output, buf);
             }
             // Add input buffers
             for inp in exec_op.inputs.iter() {
-                if let Some(buf) = self.buffers.get(inp) {
+                if let Some(buf) = self.get_buffer(inp) {
                     buffer_map.insert(*inp, buf);
                 } else if let Some(hlir_node) = self.llir_to_hlir.get(inp)
                     && let Some(CudaInput::Buffer(buf)) = self.hlir_buffers.get(hlir_node)
@@ -743,7 +825,7 @@ impl Runtime for CudaRuntime {
             let extra_nodes = exec_op.internal.extra_buffer_nodes();
             for extra_node in extra_nodes {
                 if let Entry::Vacant(e) = buffer_map.entry(extra_node) {
-                    if let Some(buf) = self.buffers.get(&extra_node) {
+                    if let Some(buf) = self.get_buffer(&extra_node) {
                         e.insert(buf);
                     } else if let Some(hlir_node) = self.llir_to_hlir.get(&extra_node)
                         && let Some(CudaInput::Buffer(buf)) = self.hlir_buffers.get(hlir_node)
