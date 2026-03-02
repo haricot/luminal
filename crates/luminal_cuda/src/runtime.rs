@@ -281,7 +281,8 @@ impl CudaRuntime {
 
         // 2. Compute live ranges from exec_graph topology.
         //    live_range[llir_node] = (first_exec_pos, last_exec_pos)
-        let exec_topo = toposort(&self.exec_graph, None).unwrap_or_default();
+        let exec_topo = toposort(&self.exec_graph, None)
+            .expect("exec_graph contains a cycle; cannot compute buffer liveness");
         let mut live_range: FxHashMap<NodeIndex, (usize, usize)> = FxHashMap::default();
         for (pos, &exec_node) in exec_topo.iter().enumerate() {
             let exec_op = &self.exec_graph[exec_node];
@@ -301,7 +302,9 @@ impl CudaRuntime {
             }
         }
 
-        // 3. Sort nodes by birth position for greedy allocation
+        // 3. Sort nodes by birth position for greedy allocation.
+        //    Nodes not referenced by any exec_graph op (orphaned) are sorted last
+        //    and get their own non-reusable allocations to preserve correctness.
         node_sizes.sort_by_key(|(node, _)| live_range.get(node).map_or(usize::MAX, |lr| lr.0));
 
         // 4. Greedy allocation with buffer reuse
